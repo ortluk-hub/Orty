@@ -2,10 +2,15 @@ from fastapi import FastAPI, Depends
 from service.schemas import ChatRequest, ChatResponse
 from service.security import verify_secret
 from service.ai import AIService
+from service.storage.sqlite import init_db
 
 app = FastAPI(title="Orty AI Assistant")
 
 ai_service = AIService()
+
+@app.on_event("startup")
+def startup():
+    init_db()
 
 @app.get("/health")
 async def health():
