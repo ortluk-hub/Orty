@@ -1,17 +1,19 @@
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
-DB_PATH = Path("orty.db")
+DEFAULT_DB_PATH = Path("orty.db")
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
+    path = db_path or DEFAULT_DB_PATH
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def init_db():
-    conn = get_connection()
+def init_db(db_path: Optional[Path] = None):
+    conn = get_connection(db_path)
     cursor = conn.cursor()
 
     cursor.execute("""
