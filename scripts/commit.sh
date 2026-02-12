@@ -7,16 +7,21 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-echo "🔍 Checking status..."
-git status
+echo "🔍 Running tests..."
+pytest
 
 echo "➕ Staging changes..."
 git add .
 
+if git diff --cached --quiet; then
+  echo "Nothing to commit."
+  exit 0
+fi
+
 echo "📝 Committing..."
 git commit -m "$1"
 
-echo "🚀 Pushing to origin..."
+echo "🚀 Pushing to origin (SSH)..."
 git push
 
 echo "✅ Done."
