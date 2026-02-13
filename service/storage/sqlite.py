@@ -12,8 +12,7 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
-
-def init_db(db_path: Optional[Path] = None):
+def init_db(db_path: str) -> None:
     conn = get_connection(db_path)
     cursor = conn.cursor()
 

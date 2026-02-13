@@ -1,35 +1,32 @@
-import httpx
-from service.config import settings
+from service.config import Settings
 
 class AIService:
+    def __init__(self):
+        # Create settings at runtime instead of import time
+        settings = Settings()
+        self.api_key = settings.OPENAI_API_KEY
+        self.model = settings.OPENAI_MODEL
 
     async def generate(self, message: str) -> str:
-        if not settings.OPENAI_API_KEY:
-            return "OPENAI_API_KEY not configured."
+        # Import httpx or other dependencies **only when needed**
+        import httpx
 
-        headers = {
-            "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        if not self.api_key:
+            raise RuntimeError("OpenAI API key not set")
 
-        payload = {
-            "model": settings.OPENAI_MODEL,
-            "messages": [
-                {"role": "system", "content": "You are Orty, a concise and intelligent on-device assistant."},
-                {"role": "user", "content": message}
-            ]
-        }
-
-        async with httpx.AsyncClient(timeout=30) as client:
+        # Example call — adjust to your actual API integration
+        async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=payload
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": message}],
+                },
+                headers={"Authorization": f"Bearer {self.api_key}"},
             )
 
-        if response.status_code != 200:
-            return f"OpenAI error: {response.text}"
-
+        response.raise_for_status()
         data = response.json()
+        # this assumes the API response is structured in the typical OpenAI way
         return data["choices"][0]["message"]["content"]
 

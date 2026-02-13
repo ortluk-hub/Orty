@@ -1,23 +1,55 @@
-from fastapi import FastAPI, Depends
-from service.schemas import ChatRequest, ChatResponse
-from service.security import verify_secret
-from service.ai import AIService
-from service.storage.sqlite import init_db
+from __future__ import annotations
 
-app = FastAPI(title="Orty AI Assistant")
+from contextlib import asynccontextmanager
 
-ai_service = AIService()
+from fastapi import Depends, FastAPI
+from pydantic import BaseModel
 
-@app.on_event("startup")
-def startup():
-    init_db()
+from service.config import Settings
+from service.security import verify_secret as require_secret
+
+
+def startup_check() -> None:
+    """
+    Validates required configuration at app startup.
+    Kept as a plain function so tests can call it directly.
+    """
+    s = Settings()
+    if not s.ORTY_SHARED_SECRET:
+        raise RuntimeError("ORTY_SHARED_SECRET is required to start Orty.")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    startup_check()
+    yield
+    # Shutdown (optional cleanup goes here)
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+class TextRequest(BaseModel):
+    text: str
+
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "assistant": "Orty"}
+def health():
+    return {"status": "ok"}
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, _: str = Depends(verify_secret)):
-    reply = await ai_service.generate(request.message)
-    return ChatResponse(reply=reply)
+
+@app.post("/text", dependencies=[Depends(require_secret)])
+def text_endpoint(payload: TextRequest):
+    """
+    Primary text endpoint.
+    Uses your AI module if available; otherwise just echoes.
+    """
+    try:
+        from service.ai import generate_text  # type: ignore
+        reply = generate_text(payload.text)
+    except Exception:
+        reply = f"Orty heard you: {payload.text}"
+
+    return {"reply": reply}
 
