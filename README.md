@@ -42,6 +42,34 @@ The system is designed to support:
 * Secure request authentication
 * Future tool integration and automation
 
+### Project Architecture Diagram
+
+```mermaid
+flowchart TD
+    C[Client] -->|POST /chat + x-orty-secret| API[FastAPI app\nservice/api.py]
+    C -->|GET /health| API
+
+    API --> SEC[verify_secret\nservice/security.py]
+    API --> AI[AIService\nservice/ai.py]
+    API --> MEM[MemoryStore\nservice/memory.py]
+
+    MEM -->|read recent history| DB[(SQLite\nsettings.SQLITE_PATH)]
+    API -->|append user + assistant messages| MEM
+
+    AI -->|provider=openai| OAI[OpenAI Chat Completions API]
+    AI -->|provider=ollama| OLL[Ollama /api/chat]
+    AI -->|/tool echo\n/tool utc_time| TOOLS[Built-in tool handlers]
+
+    CFG[service/config.py\nSettings] --> API
+    CFG --> AI
+    CFG --> MEM
+```
+
+Request flow summary:
+1. `/chat` verifies `x-orty-secret`, then loads recent conversation history from SQLite.
+2. `AIService` either executes a built-in tool command or routes to the configured LLM provider.
+3. User + assistant messages are persisted, and the assistant reply is returned with `conversation_id`.
+
 ---
 
 ## Tech Stack

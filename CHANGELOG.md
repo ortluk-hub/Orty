@@ -5,6 +5,7 @@ All notable changes to Orty will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added a Mermaid-based project architecture diagram to README showing client/API/security, AI provider routing, tool execution, and SQLite memory flow.
 - Added initial built-in tool execution path in `AIService` via `/tool <name> [input]`, with default `echo` and `utc_time` tools plus runtime tool registration support.
 - Added unit tests covering tool execution, UTC tool output shape, and unknown-tool error messaging.
 - Added explicit roadmap position summary to clarify current phase, completed core foundations, and next milestone focus.
