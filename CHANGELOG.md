@@ -9,6 +9,8 @@ All notable changes to Orty will be documented in this file.
 - Added SQLite-backed memory persistence for chat history, including generated/reused conversation IDs.
 - Added Ollama provider support with configurable base URL and model via environment variables.
 - Added unit tests for memory store behavior and provider selection routing.
+- Refined LLM abstraction in `AIService` with a provider registry, explicit unsupported-provider messaging, and runtime registration support for additional providers.
+
 
 ### Fixed
 - Re-checked GitHub push readiness on `dev`: configured `origin` to `https://github.com/ortluk-hub/Orty.git`, reran unit tests (`9 passed`), and retried `git push -u origin dev`; push is still blocked in this runtime because no interactive HTTPS username/PAT is available.
