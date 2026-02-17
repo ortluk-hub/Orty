@@ -135,6 +135,14 @@ Expected response:
 ```
 
 
+
+Tool usage (initial built-in support):
+
+- Use `/tool echo <text>` to return text directly
+- Use `/tool utc_time` to return current UTC timestamp
+
+If a tool command is used, Orty executes the tool first and returns the tool result.
+
 Chat endpoint now supports lightweight memory persistence via SQLite:
 
 - include optional `conversation_id` in `/chat` requests to continue a thread
