@@ -9,10 +9,14 @@ from service.config import settings
 class MemoryStore:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or settings.SQLITE_PATH
+        self.timeout_seconds = settings.SQLITE_TIMEOUT_SECONDS
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=self.timeout_seconds)
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
 
     def _initialize(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -26,6 +30,12 @@ class MemoryStore:
                     content TEXT NOT NULL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_id
+                ON messages (conversation_id, id)
                 """
             )
 
