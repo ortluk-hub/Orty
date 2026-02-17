@@ -124,6 +124,7 @@ def test_generate_executes_fs_list_tool(tmp_path, monkeypatch):
 def test_generate_executes_fs_read_tool(tmp_path, monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "FS_READ_ENABLED", True)
     monkeypatch.setattr(settings, "FS_READ_ROOT", str(tmp_path))
     file_path = tmp_path / "note.txt"
     file_path.write_text("hello fs", encoding="utf-8")
@@ -133,9 +134,20 @@ def test_generate_executes_fs_read_tool(tmp_path, monkeypatch):
     assert result == "hello fs"
 
 
+def test_generate_rejects_fs_read_when_disabled(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "FS_READ_ENABLED", False)
+
+    result = asyncio.run(service.generate("/tool fs_read secrets.txt"))
+
+    assert result == "Tool 'fs_read' is disabled. Set FS_READ_ENABLED=true to enable it."
+
+
 def test_generate_rejects_fs_read_outside_configured_root(tmp_path, monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "FS_READ_ENABLED", True)
     monkeypatch.setattr(settings, "FS_READ_ROOT", str(tmp_path))
 
     outside_file = tmp_path.parent / "outside.txt"
@@ -149,6 +161,7 @@ def test_generate_rejects_fs_read_outside_configured_root(tmp_path, monkeypatch)
 def test_generate_rejects_fs_read_path_traversal(tmp_path, monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "FS_READ_ENABLED", True)
 
     root = tmp_path / "root"
     root.mkdir()

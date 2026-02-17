@@ -18,6 +18,12 @@ class Settings:
     SQLITE_PATH: str = os.getenv("SQLITE_PATH", "data/orty.db")
     SQLITE_TIMEOUT_SECONDS: float = float(os.getenv("SQLITE_TIMEOUT_SECONDS", "5"))
 
+    FS_READ_ENABLED: bool = os.getenv("FS_READ_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     FS_READ_ROOT: str = os.getenv("FS_READ_ROOT", ".")
 
 

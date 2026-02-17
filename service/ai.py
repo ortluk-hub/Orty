@@ -153,10 +153,7 @@ class AIService:
         fs_read_root = Path(settings.FS_READ_ROOT).expanduser().resolve()
 
         expanded_input = Path(raw_path).expanduser()
-        if expanded_input.is_absolute():
-            candidate = expanded_input.resolve()
-        else:
-            candidate = (fs_read_root / expanded_input).resolve()
+        candidate = (fs_read_root / expanded_input).resolve()
 
         try:
             candidate.relative_to(fs_read_root)
@@ -168,6 +165,9 @@ class AIService:
         return candidate, None
 
     def _tool_fs_read(self, tool_input: str) -> str:
+        if not settings.FS_READ_ENABLED:
+            return "Tool 'fs_read' is disabled. Set FS_READ_ENABLED=true to enable it."
+
         if not tool_input:
             return "Usage: /tool fs_read <path>"
 
