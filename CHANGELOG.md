@@ -5,6 +5,8 @@ All notable changes to Orty will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Improved SQLite wiring in `MemoryStore` with WAL mode, configurable connection timeout, and a `(conversation_id, id)` index for faster history reads under concurrent usage.
+- Added a unit test asserting SQLite index creation for memory queries.
 - Added a Mermaid-based project architecture diagram to README showing client/API/security, AI provider routing, tool execution, and SQLite memory flow.
 - Added initial built-in tool execution path in `AIService` via `/tool <name> [input]`, with default `echo` and `utc_time` tools plus runtime tool registration support.
 - Added unit tests covering tool execution, UTC tool output shape, and unknown-tool error messaging.
@@ -23,6 +25,7 @@ All notable changes to Orty will be documented in this file.
 - Added unit tests for health and chat endpoint behavior (auth required, auth rejection, and no-API-key fallback) so roadmap/documentation changes are validated by executable checks.
 
 ### Documentation
+- Removed extensive GitHub push/auth/troubleshooting instructions from `README.md`; development workflow docs now stay focused on local branch/merge flow.
 - Clarified in `README.md` that `git push` from non-interactive environments requires preconfigured credentials (credential helper, `GH_TOKEN`/PAT wiring, or SSH agent), otherwise Git cannot prompt for a username/password.
 - Added a non-interactive HTTPS push example that reads the username from `GITHUB-USER` (or `GITHUB_USER`) and uses `GITHUB_TOKEN` for PAT-based authentication.
 - Updated HTTPS credential docs to also support `GITHUB-PAT`/`GITHUB_PAT` and made the non-interactive push example resolve both hyphenated and underscored env var names.

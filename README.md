@@ -77,7 +77,7 @@ Request flow summary:
 * Python 3.12+
 * FastAPI
 * Uvicorn
-* SQLite (memory persistence enabled)
+* SQLite (memory persistence enabled, WAL mode, configurable connection timeout)
 * OpenAI and Ollama provider support
 * Git for version control
 
@@ -138,6 +138,7 @@ OPENAI_API_KEY=your_openai_key_here
 # OLLAMA_BASE_URL=http://localhost:11434
 # OLLAMA_MODEL=llama3.2
 SQLITE_PATH=data/orty.db
+SQLITE_TIMEOUT_SECONDS=5
 ```
 
 This value is required for API authentication.
@@ -195,126 +196,9 @@ Requests without this header or with an invalid value will be rejected.
 * `main` branch → Stable releases
 * `dev` branch → Active development
 
-Create features in `dev`, then push to GitHub (`git push origin dev`) to publish commits remotely.
-
-If this repo has no remote configured yet, add one first:
-
-```
-git remote add origin https://github.com/ortluk-hub/Orty.git
-```
-
-Note: `git commit` saves changes locally only; GitHub is updated after `git push`.
+Create features in `dev` and merge when ready.
 
 Version tags are used for milestone tracking.
-
-### GitHub credentials required for push
-
-#### Explain like I'm 5
-- `git commit` puts your toy in your backpack (your computer).
-- `git push` puts your toy on the classroom shelf (GitHub).
-- To put it on the shelf, GitHub asks: “Who are you?”
-- Your name tag is `GITHUB_USER`; your secret pass is `GITHUB_PAT` (or `GITHUB_TOKEN`).
-- If those are missing, push will fail, even if `origin` is set correctly.
-
-Configuring `origin` only sets the remote URL; you still need GitHub credentials to authenticate when pushing.
-
-In non-interactive shells (like CI/Codex runtimes), `git push` cannot answer username/password prompts. Preconfigure credentials first (credential helper, exported PAT for the command, or SSH auth) before retrying push.
-
-Before pushing, verify the credentials are visible in the current process environment (example: `env | rg -i '^GITHUB(_|-)(USER|PAT)|^GITHUB_TOKEN='`). If nothing prints, the runtime did not inject them into this shell session.
-
-Use one of these methods:
-
-1. **HTTPS + Personal Access Token (PAT)**
-   - Username variable (recommended): `GITHUB_USER`
-   - PAT variable (recommended): `GITHUB_PAT` (or `GITHUB_TOKEN`)
-   - Hyphenated names like `GITHUB-USER` / `GITHUB-PAT` are only usable when injected externally; they cannot be assigned with normal Bash `export` syntax.
-   - Password prompt: use a GitHub PAT (not your GitHub account password)
-   - Recommended classic/fine-grained permission: repository write access (for private repos, equivalent to classic `repo` scope)
-   - Non-interactive push example:
-
-```bash
-# preferred shell-exportable names
-export GITHUB_USER="your-github-username"
-export GITHUB_PAT="your-pat"
-
-# optional fallback if a runtime injects hyphenated names
-GITHUB_USER="${GITHUB_USER:-$(printenv 'GITHUB-USER')}"
-GITHUB_PAT="${GITHUB_PAT:-$(printenv 'GITHUB-PAT')}"
-
-git push "https://${GITHUB_USER}:${GITHUB_PAT}@github.com/ortluk-hub/Orty.git" dev
-```
-
-2. **SSH key authentication**
-   - Create an SSH key (`ed25519` recommended)
-   - Add the public key to GitHub (Settings → SSH and GPG keys)
-   - Set remote to `git@github.com:ortluk-hub/Orty.git`
-
-Without one of the above credential methods, `git push` will fail even if `origin` is configured correctly.
-
-### Preferred GitHub transport: SSH
-
-If HTTPS proxying is unreliable, use SSH for GitHub remotes:
-
-```
-git remote set-url origin git@github.com:ortluk-hub/Orty.git
-ssh -T git@github.com
-git push -u origin dev
-```
-
-If you do not yet have an SSH key:
-
-```
-ssh-keygen -t ed25519 -C "ortluk@gmail.com"
-cat ~/.ssh/id_ed25519.pub
-```
-
-Add the printed public key to GitHub (Settings → SSH and GPG keys), then re-run:
-
-```
-ssh -T git@github.com
-git push -u origin dev
-```
-
-### Troubleshooting GitHub proxy/tunnel errors (403 prevention)
-
-If you see `CONNECT tunnel failed, response 403` on `git push`, the proxy is denying the GitHub tunnel. Use this order to prevent repeated 403s:
-
-1. Check whether a proxy is forced by environment or Git config:
-
-```
-env | grep -i proxy
-git config --global --get-regexp proxy
-```
-
-2. Remove Git-level proxy overrides so Git can use direct connectivity when available:
-
-```
-git config --global --unset http.proxy
-git config --global --unset https.proxy
-```
-
-3. Retry push with GitHub excluded from proxying:
-
-```
-NO_PROXY=github.com,api.github.com GIT_CURL_VERBOSE=1 git push -u origin dev
-```
-
-4. If your organization requires proxy usage, request/confirm allowlisting for:
-   - `github.com`
-   - `api.github.com`
-   - `codeload.github.com`
-
-5. If HTTPS is still blocked, switch remote to SSH (usually bypasses HTTPS CONNECT restrictions):
-
-```
-git remote set-url origin git@github.com:ortluk-hub/Orty.git
-ssh -T git@github.com
-git push -u origin dev
-```
-
-6. Ensure GitHub auth is valid (403 can also be auth/permission related):
-   - Use a PAT with `repo` scope for HTTPS, or
-   - Confirm your SSH key is added to the correct GitHub account.
 
 ---
 

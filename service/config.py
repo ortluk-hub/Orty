@@ -16,6 +16,7 @@ class Settings:
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
 
     SQLITE_PATH: str = os.getenv("SQLITE_PATH", "data/orty.db")
+    SQLITE_TIMEOUT_SECONDS: float = float(os.getenv("SQLITE_TIMEOUT_SECONDS", "5"))
 
 
 settings = Settings()
