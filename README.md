@@ -171,8 +171,23 @@ Note: `git commit` saves changes locally only; GitHub is updated after `git push
 
 Version tags are used for milestone tracking.
 
+### GitHub credentials required for push
 
+Configuring `origin` only sets the remote URL; you still need GitHub credentials to authenticate when pushing.
 
+Use one of these methods:
+
+1. **HTTPS + Personal Access Token (PAT)**
+   - Username: your GitHub username
+   - Password prompt: use a GitHub PAT (not your GitHub account password)
+   - Recommended classic/fine-grained permission: repository write access (for private repos, equivalent to classic `repo` scope)
+
+2. **SSH key authentication**
+   - Create an SSH key (`ed25519` recommended)
+   - Add the public key to GitHub (Settings → SSH and GPG keys)
+   - Set remote to `git@github.com:ortluk-hub/Orty.git`
+
+Without one of the above credential methods, `git push` will fail even if `origin` is configured correctly.
 
 ### Preferred GitHub transport: SSH
 
