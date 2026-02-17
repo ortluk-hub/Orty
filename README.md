@@ -171,8 +171,49 @@ Note: `git commit` saves changes locally only; GitHub is updated after `git push
 
 Version tags are used for milestone tracking.
 
+### GitHub credentials required for push
 
+#### Explain like I'm 5
+- `git commit` puts your toy in your backpack (your computer).
+- `git push` puts your toy on the classroom shelf (GitHub).
+- To put it on the shelf, GitHub asks: “Who are you?”
+- Your name tag is `GITHUB_USER`; your secret pass is `GITHUB_PAT` (or `GITHUB_TOKEN`).
+- If those are missing, push will fail, even if `origin` is set correctly.
 
+Configuring `origin` only sets the remote URL; you still need GitHub credentials to authenticate when pushing.
+
+In non-interactive shells (like CI/Codex runtimes), `git push` cannot answer username/password prompts. Preconfigure credentials first (credential helper, exported PAT for the command, or SSH auth) before retrying push.
+
+Before pushing, verify the credentials are visible in the current process environment (example: `env | rg -i '^GITHUB(_|-)(USER|PAT)|^GITHUB_TOKEN='`). If nothing prints, the runtime did not inject them into this shell session.
+
+Use one of these methods:
+
+1. **HTTPS + Personal Access Token (PAT)**
+   - Username variable (recommended): `GITHUB_USER`
+   - PAT variable (recommended): `GITHUB_PAT` (or `GITHUB_TOKEN`)
+   - Hyphenated names like `GITHUB-USER` / `GITHUB-PAT` are only usable when injected externally; they cannot be assigned with normal Bash `export` syntax.
+   - Password prompt: use a GitHub PAT (not your GitHub account password)
+   - Recommended classic/fine-grained permission: repository write access (for private repos, equivalent to classic `repo` scope)
+   - Non-interactive push example:
+
+```bash
+# preferred shell-exportable names
+export GITHUB_USER="your-github-username"
+export GITHUB_PAT="your-pat"
+
+# optional fallback if a runtime injects hyphenated names
+GITHUB_USER="${GITHUB_USER:-$(printenv 'GITHUB-USER')}"
+GITHUB_PAT="${GITHUB_PAT:-$(printenv 'GITHUB-PAT')}"
+
+git push "https://${GITHUB_USER}:${GITHUB_PAT}@github.com/ortluk-hub/Orty.git" dev
+```
+
+2. **SSH key authentication**
+   - Create an SSH key (`ed25519` recommended)
+   - Add the public key to GitHub (Settings → SSH and GPG keys)
+   - Set remote to `git@github.com:ortluk-hub/Orty.git`
+
+Without one of the above credential methods, `git push` will fail even if `origin` is configured correctly.
 
 ### Preferred GitHub transport: SSH
 
@@ -187,7 +228,7 @@ git push -u origin dev
 If you do not yet have an SSH key:
 
 ```
-ssh-keygen -t ed25519 -C "your_email@example.com"
+ssh-keygen -t ed25519 -C "ortluk@gmail.com"
 cat ~/.ssh/id_ed25519.pub
 ```
 
@@ -243,6 +284,18 @@ git push -u origin dev
 
 ## Roadmap
 
+### What’s next (near-term)
+1. **LLM abstraction refinement**
+   - Standardize provider interfaces (OpenAI/Ollama)
+   - Improve provider selection and error handling paths
+2. **Tool execution support**
+   - Define safe tool interface contracts
+   - Add first internal tool(s) behind auth and validation
+3. **Conversation + memory evolution**
+   - Expand conversation lifecycle controls
+   - Improve memory retrieval behavior across turns
+
+### Full roadmap
 * SQLite persistence layer
 * Conversation management system
 * LLM abstraction layer
