@@ -1,20 +1,35 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+
 import httpx
 
 from service.config import settings
+
+GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
 
 
 class AIService:
     def __init__(self):
         self.system_prompt = "You are Orty, a concise and intelligent on-device assistant."
+        self._providers: dict[str, GenerateFn] = {
+            "openai": self._generate_openai,
+            "ollama": self._generate_ollama,
+        }
+
+    def register_provider(self, name: str, generator: GenerateFn) -> None:
+        self._providers[name.lower()] = generator
 
     async def generate(self, message: str, history: list[dict[str, str]] | None = None) -> str:
-        provider = settings.LLM_PROVIDER
+        provider = settings.LLM_PROVIDER.lower()
         history = history or []
 
-        if provider == "ollama":
-            return await self._generate_ollama(message, history)
+        generator = self._providers.get(provider)
+        if generator is None:
+            available = ", ".join(sorted(self._providers.keys()))
+            return f"Unsupported LLM_PROVIDER '{provider}'. Available providers: {available}."
 
-        return await self._generate_openai(message, history)
+        return await generator(message, history)
 
     async def _generate_openai(self, message: str, history: list[dict[str, str]]) -> str:
         if not settings.OPENAI_API_KEY:
