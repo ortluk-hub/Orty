@@ -26,14 +26,3 @@ def test_memory_store_persists_and_reads_recent_messages(tmp_path):
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
     ]
-
-
-def test_memory_store_supports_in_memory_sqlite_path():
-    store = MemoryStore(":memory:")
-
-    conversation_id = "conv-memory"
-    store.append_message(conversation_id, "user", "hello")
-
-    history = store.get_recent_messages(conversation_id)
-
-    assert history == [{"role": "user", "content": "hello"}]

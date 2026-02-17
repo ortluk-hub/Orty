@@ -174,17 +174,6 @@ Version tags are used for milestone tracking.
 
 
 
-### Environment limitations (sandbox/proxy)
-
-Yes — this agent runs inside a sandboxed/containerized environment.
-
-What that means in practice:
-- Local file edits, tests, and commits work normally.
-- Network egress can be restricted by proxy/firewall policy.
-- GitHub push may fail even with correct git/SSH setup if outbound access is blocked by the environment.
-
-When this happens, validate locally (`pytest`, `git status`, `git log`) and push from your local machine or a CI runner with GitHub network access.
-
 ### Preferred GitHub transport: SSH
 
 If HTTPS proxying is unreliable, use SSH for GitHub remotes:
@@ -201,9 +190,6 @@ If you do not yet have an SSH key:
 ssh-keygen -t ed25519 -C "your_email@example.com"
 cat ~/.ssh/id_ed25519.pub
 ```
-
-> Important: you do **not** need to add this agent/container key to your GitHub account.
-> Add **your own machine user key** (or CI deploy key) to the GitHub account/repo that will run `git push`.
 
 Add the printed public key to GitHub (Settings → SSH and GPG keys), then re-run:
 
