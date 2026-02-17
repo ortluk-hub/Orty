@@ -1,27 +1,30 @@
 # Orty
 
+![Version](https://img.shields.io/badge/version-v0.1.0--alpha-blue)
+
 Orty is a modular, on-device AI assistant built with FastAPI and designed for clean architecture, extensibility, and local-first operation. The project is currently in early alpha and focused on building a solid architectural foundation before feature expansion.
 
 ## Status
 
 Version: v0.1.0-alpha
-Current Phase: Core API + Authentication + SQLite memory
-Next Phase: LLM abstraction refinement and tool execution support
+Current Phase: LLM abstraction + built-in tools + SQLite memory
+Next Phase: Conversation controls, safer tool contracts, and automation extensions
 
 ---
 
 ## Current Roadmap Position
 
-Orty is currently in **v0.1.0-alpha** and in the **Core API + Authentication + SQLite memory** phase.
+Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in tools + SQLite memory** phase.
 
 ### What is already in place
 - FastAPI application structure and running server entrypoint
-- Health endpoint
-- Shared-secret request authentication
-- Basic chat endpoint wired to an LLM provider call
+- Health endpoint and shared-secret request authentication
+- Chat endpoint with OpenAI/Ollama provider routing and pluggable provider registry
+- Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
+- SQLite-backed conversation memory with recent-history retrieval
 
 ### What comes next
-The next planned milestone is **LLM abstraction refinement and tool execution support**, followed by broader automation integrations.
+The next planned milestone is **conversation controls, safer tool contracts, and automation extensions**.
 
 ---
 
@@ -205,19 +208,20 @@ Version tags are used for milestone tracking.
 ## Roadmap
 
 ### What’s next (near-term)
-1. **LLM abstraction refinement**
-   - Standardize provider interfaces (OpenAI/Ollama)
-   - Improve provider selection and error handling paths
-2. **Tool execution support**
-   - Define safe tool interface contracts
-   - Add first internal tool(s) behind auth and validation
-3. **Conversation + memory evolution**
-   - Expand conversation lifecycle controls
-   - Improve memory retrieval behavior across turns
+1. **Conversation lifecycle controls**
+   - Add explicit APIs to inspect/reset/archive conversations
+   - Improve conversation metadata handling for multi-session usage
+2. **Safer, extensible tool contracts**
+   - Formalize tool input/output schemas and validation rules
+   - Add guardrails (path limits, execution policy, audit logging)
+3. **Automation + integration expansion**
+   - Add structured hooks for scheduled/triggered actions
+   - Prepare connectors for external services while keeping local-first defaults
 
 ### Full roadmap
-* SQLite persistence layer
 * Conversation management system
+* Advanced memory retrieval + summarization
+* Expanded secure automation integrations
 * LLM abstraction layer
 * Tool execution framework
 * Background task system

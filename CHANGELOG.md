@@ -27,6 +27,8 @@ All notable changes to Orty will be documented in this file.
 - Added unit tests for health and chat endpoint behavior (auth required, auth rejection, and no-API-key fallback) so roadmap/documentation changes are validated by executable checks.
 
 ### Documentation
+- Added a README version badge (`v0.1.0-alpha`) for quick project status visibility at a glance.
+- Updated README roadmap/status sections to reflect completed LLM abstraction + built-in tool milestones and to shift near-term planning toward conversation controls, safer tool contracts, and automation extensions.
 - Removed extensive GitHub push/auth/troubleshooting instructions from `README.md`; development workflow docs now stay focused on local branch/merge flow.
 - Clarified in `README.md` that `git push` from non-interactive environments requires preconfigured credentials (credential helper, `GH_TOKEN`/PAT wiring, or SSH agent), otherwise Git cannot prompt for a username/password.
 - Added a non-interactive HTTPS push example that reads the username from `GITHUB-USER` (or `GITHUB_USER`) and uses `GITHUB_TOKEN` for PAT-based authentication.
