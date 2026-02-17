@@ -97,4 +97,36 @@ def test_generate_returns_available_tools_for_unknown_tool(monkeypatch):
 
     result = asyncio.run(service.generate("/tool missing"))
 
-    assert result == "Tool 'missing' is not available. Available tools: echo, utc_time."
+    assert result == "Tool 'missing' is not available. Available tools: echo, fs_list, fs_pwd, fs_read, utc_time."
+
+
+def test_generate_executes_fs_pwd_tool(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    result = asyncio.run(service.generate("/tool fs_pwd"))
+
+    assert result
+
+
+def test_generate_executes_fs_list_tool(tmp_path, monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    (tmp_path / "one.txt").write_text("1", encoding="utf-8")
+    (tmp_path / "two").mkdir()
+
+    result = asyncio.run(service.generate(f"/tool fs_list {tmp_path}"))
+
+    assert "one.txt" in result
+    assert "two/" in result
+
+
+def test_generate_executes_fs_read_tool(tmp_path, monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    file_path = tmp_path / "note.txt"
+    file_path.write_text("hello fs", encoding="utf-8")
+
+    result = asyncio.run(service.generate(f"/tool fs_read {file_path}"))
+
+    assert result == "hello fs"

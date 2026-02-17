@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from pathlib import Path
 import re
 
 import httpx
@@ -22,6 +23,9 @@ class AIService:
         self._tools: dict[str, ToolFn] = {
             "echo": self._tool_echo,
             "utc_time": self._tool_utc_time,
+            "fs_pwd": self._tool_fs_pwd,
+            "fs_list": self._tool_fs_list,
+            "fs_read": self._tool_fs_read,
         }
 
     def register_provider(self, name: str, generator: GenerateFn) -> None:
@@ -121,3 +125,43 @@ class AIService:
 
     def _tool_utc_time(self, _: str) -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    def _tool_fs_pwd(self, _: str) -> str:
+        return str(Path.cwd())
+
+    def _tool_fs_list(self, tool_input: str) -> str:
+        target = Path(tool_input or ".")
+
+        try:
+            if not target.exists():
+                return f"Path not found: {target}"
+            if not target.is_dir():
+                return f"Path is not a directory: {target}"
+
+            items = [
+                f"{entry.name}/" if entry.is_dir() else entry.name
+                for entry in sorted(target.iterdir(), key=lambda entry: entry.name.lower())
+            ]
+        except OSError as exc:
+            return f"Filesystem error: {exc}"
+
+        if not items:
+            return f"(empty directory) {target.resolve()}"
+        return "\n".join(items)
+
+    def _tool_fs_read(self, tool_input: str) -> str:
+        if not tool_input:
+            return "Usage: /tool fs_read <path>"
+
+        target = Path(tool_input)
+        try:
+            if not target.exists():
+                return f"Path not found: {target}"
+            if target.is_dir():
+                return f"Path is a directory: {target}"
+
+            return target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return f"File is not UTF-8 text: {target}"
+        except OSError as exc:
+            return f"Filesystem error: {exc}"

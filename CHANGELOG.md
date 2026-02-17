@@ -5,6 +5,8 @@ All notable changes to Orty will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added filesystem tools to `AIService` for local access: `/tool fs_pwd` (current working directory), `/tool fs_list [path]` (directory listing), and `/tool fs_read <path>` (UTF-8 file read).
+- Added unit tests covering filesystem tool behavior and updated unknown-tool messaging to include newly available filesystem tools.
 - Improved SQLite wiring in `MemoryStore` with WAL mode, configurable connection timeout, and a `(conversation_id, id)` index for faster history reads under concurrent usage.
 - Added a unit test asserting SQLite index creation for memory queries.
 - Added a Mermaid-based project architecture diagram to README showing client/API/security, AI provider routing, tool execution, and SQLite memory flow.
