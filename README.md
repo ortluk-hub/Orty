@@ -139,9 +139,13 @@ OPENAI_API_KEY=your_openai_key_here
 # OLLAMA_MODEL=llama3.2
 SQLITE_PATH=data/orty.db
 SQLITE_TIMEOUT_SECONDS=5
+FS_READ_ENABLED=false
+FS_READ_ROOT=.
 ```
 
 This value is required for API authentication.
+
+If you enable filesystem reads, set `FS_READ_ENABLED=true` and restrict access with `FS_READ_ROOT` (defaults to the current directory). The `fs_read` tool is disabled by default for safety.
 
 ---
 
