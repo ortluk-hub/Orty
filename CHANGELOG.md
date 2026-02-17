@@ -11,7 +11,7 @@ All notable changes to Orty will be documented in this file.
 - Added unit tests for memory store behavior and provider selection routing.
 
 ### Fixed
-- Configured `origin` remote to `https://github.com/ortluk-hub/Orty.git`, verified local sanity checks (`pytest -q`: 9 passed), and attempted `git push -u origin dev`; push is currently blocked in this environment because GitHub HTTPS credentials are unavailable.
+- Configured `origin` remote to `https://github.com/ortluk-hub/Orty.git`, verified local sanity checks (`pytest -q`: 9 passed), and verified `git push -u origin dev` works when authenticated with a GitHub PAT.
 - Re-ran full unit test suite after SQLite memory + Ollama integration verification; all tests pass as expected.
 - Added unit tests for health and chat endpoint behavior (auth required, auth rejection, and no-API-key fallback) so roadmap/documentation changes are validated by executable checks.
 
