@@ -60,3 +60,41 @@ def test_generate_can_use_registered_custom_provider(monkeypatch):
     result = asyncio.run(service.generate("hello", history=[{"role": "user", "content": "x"}]))
 
     assert result == "mock:hello:1"
+
+
+def test_generate_executes_echo_tool_before_provider(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    async def fake_openai(message, history):
+        return "openai-reply"
+
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate("/tool echo hello tools"))
+
+    assert result == "hello tools"
+
+
+def test_generate_executes_utc_time_tool_before_provider(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    async def fake_openai(message, history):
+        return "openai-reply"
+
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate("/tool utc_time"))
+
+    assert "T" in result
+    assert result.endswith("+00:00")
+
+
+def test_generate_returns_available_tools_for_unknown_tool(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    result = asyncio.run(service.generate("/tool missing"))
+
+    assert result == "Tool 'missing' is not available. Available tools: echo, utc_time."

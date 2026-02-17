@@ -5,6 +5,8 @@ All notable changes to Orty will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added initial built-in tool execution path in `AIService` via `/tool <name> [input]`, with default `echo` and `utc_time` tools plus runtime tool registration support.
+- Added unit tests covering tool execution, UTC tool output shape, and unknown-tool error messaging.
 - Added explicit roadmap position summary to clarify current phase, completed core foundations, and next milestone focus.
 - Added SQLite-backed memory persistence for chat history, including generated/reused conversation IDs.
 - Added Ollama provider support with configurable base URL and model via environment variables.

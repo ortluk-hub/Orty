@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
+import re
 
 import httpx
 
 from service.config import settings
 
 GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
+ToolFn = Callable[[str], str]
 
 
 class AIService:
@@ -16,13 +19,24 @@ class AIService:
             "openai": self._generate_openai,
             "ollama": self._generate_ollama,
         }
+        self._tools: dict[str, ToolFn] = {
+            "echo": self._tool_echo,
+            "utc_time": self._tool_utc_time,
+        }
 
     def register_provider(self, name: str, generator: GenerateFn) -> None:
         self._providers[name.lower()] = generator
 
+    def register_tool(self, name: str, tool: ToolFn) -> None:
+        self._tools[name.lower()] = tool
+
     async def generate(self, message: str, history: list[dict[str, str]] | None = None) -> str:
         provider = settings.LLM_PROVIDER.lower()
         history = history or []
+
+        tool_result = self._maybe_execute_tool(message)
+        if tool_result is not None:
+            return tool_result
 
         generator = self._providers.get(provider)
         if generator is None:
@@ -84,3 +98,26 @@ class AIService:
 
         data = response.json()
         return data["message"]["content"]
+
+    def _maybe_execute_tool(self, message: str) -> str | None:
+        match = re.match(r"^\s*/tool\s+([a-zA-Z0-9_-]+)(?:\s+(.*))?$", message)
+        if not match:
+            return None
+
+        tool_name = match.group(1).lower()
+        tool_input = (match.group(2) or "").strip()
+
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            available = ", ".join(sorted(self._tools.keys()))
+            return f"Tool '{tool_name}' is not available. Available tools: {available}."
+
+        return tool(tool_input)
+
+    def _tool_echo(self, tool_input: str) -> str:
+        if not tool_input:
+            return "(echo)"
+        return tool_input
+
+    def _tool_utc_time(self, _: str) -> str:
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
