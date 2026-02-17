@@ -1,5 +1,7 @@
 # Orty
 
+![Version](https://img.shields.io/badge/version-v0.1.0--alpha-blue)
+
 Orty is a modular, on-device AI assistant built with FastAPI and designed for clean architecture, extensibility, and local-first operation. The project is currently in early alpha and focused on building a solid architectural foundation before feature expansion.
 
 ## Status
