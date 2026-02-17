@@ -149,11 +149,32 @@ class AIService:
             return f"(empty directory) {target.resolve()}"
         return "\n".join(items)
 
+    def _resolve_fs_read_target(self, raw_path: str) -> tuple[Path | None, str | None]:
+        fs_read_root = Path(settings.FS_READ_ROOT).expanduser().resolve()
+
+        expanded_input = Path(raw_path).expanduser()
+        if expanded_input.is_absolute():
+            candidate = expanded_input.resolve()
+        else:
+            candidate = (fs_read_root / expanded_input).resolve()
+
+        try:
+            candidate.relative_to(fs_read_root)
+        except ValueError:
+            return None, (
+                f"Access denied: path must stay within FS_READ_ROOT ({fs_read_root})."
+            )
+
+        return candidate, None
+
     def _tool_fs_read(self, tool_input: str) -> str:
         if not tool_input:
             return "Usage: /tool fs_read <path>"
 
-        target = Path(tool_input)
+        target, error = self._resolve_fs_read_target(tool_input)
+        if error is not None or target is None:
+            return error or "Access denied."
+
         try:
             if not target.exists():
                 return f"Path not found: {target}"

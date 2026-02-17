@@ -124,9 +124,39 @@ def test_generate_executes_fs_list_tool(tmp_path, monkeypatch):
 def test_generate_executes_fs_read_tool(tmp_path, monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "FS_READ_ROOT", str(tmp_path))
     file_path = tmp_path / "note.txt"
     file_path.write_text("hello fs", encoding="utf-8")
 
-    result = asyncio.run(service.generate(f"/tool fs_read {file_path}"))
+    result = asyncio.run(service.generate("/tool fs_read note.txt"))
 
     assert result == "hello fs"
+
+
+def test_generate_rejects_fs_read_outside_configured_root(tmp_path, monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "FS_READ_ROOT", str(tmp_path))
+
+    outside_file = tmp_path.parent / "outside.txt"
+    outside_file.write_text("outside", encoding="utf-8")
+
+    result = asyncio.run(service.generate(f"/tool fs_read {outside_file}"))
+
+    assert "Access denied" in result
+
+
+def test_generate_rejects_fs_read_path_traversal(tmp_path, monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(settings, "FS_READ_ROOT", str(root))
+
+    escaped_file = tmp_path / "secret.txt"
+    escaped_file.write_text("top-secret", encoding="utf-8")
+
+    result = asyncio.run(service.generate("/tool fs_read ../secret.txt"))
+
+    assert "Access denied" in result
