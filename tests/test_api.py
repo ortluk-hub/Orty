@@ -75,3 +75,11 @@ def test_ui_home_page_is_available():
     assert "text/html" in response.headers["content-type"]
     assert "Orty Web UI" in response.text
     assert "Simple testing interface for chat + conversation continuity." in response.text
+
+
+def test_ui_chat_messages_are_rendered_as_text_nodes():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "createTextNode" in response.text
+    assert "div.innerHTML" not in response.text
