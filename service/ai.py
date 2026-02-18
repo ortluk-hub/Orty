@@ -91,10 +91,17 @@ class AIService:
             ],
         }
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
-                json=payload,
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{settings.OLLAMA_BASE_URL}/api/chat",
+                    json=payload,
+                )
+        except httpx.RequestError:
+            return (
+                "Ollama is not reachable. "
+                f"Expected server at {settings.OLLAMA_BASE_URL}. "
+                "Start Ollama locally or set LLM_PROVIDER=openai with OPENAI_API_KEY configured."
             )
 
         if response.status_code != 200:
