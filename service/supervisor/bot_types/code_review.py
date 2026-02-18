@@ -63,7 +63,7 @@ async def _clone_repo(repository_url: str, branch: str | None) -> str:
 
     try:
         _, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
-    except TimeoutError:
+    except asyncio.TimeoutError:
         process.kill()
         await process.wait()
         raise RuntimeError("Repository clone timed out")
