@@ -1,6 +1,7 @@
 from fastapi import Header, HTTPException
 
 from service.config import settings
+from service.memory import MemoryStore
 from service.security import verify_client_token
 from service.storage.bot_events_repo import BotEventsRepository
 from service.storage.bots_repo import BotsRepository
@@ -16,7 +17,8 @@ bots_repo = BotsRepository(_db)
 bot_events_repo = BotEventsRepository(_db)
 event_writer = BotEventWriter(bot_events_repo)
 bot_registry = BotRegistry(bots_repo, event_writer)
-bot_runner = BotRunner(bot_registry, bots_repo, event_writer)
+memory_store = MemoryStore(_db.db_path)
+bot_runner = BotRunner(bot_registry, bots_repo, event_writer, memory_store)
 
 
 def require_client_auth(
