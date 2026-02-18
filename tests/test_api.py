@@ -69,7 +69,7 @@ def test_chat_reuses_conversation_id(monkeypatch):
 
 
 def test_ui_home_page_is_available():
-    response = client.get("/")
+    response = client.get("/ui")
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
@@ -78,7 +78,7 @@ def test_ui_home_page_is_available():
 
 
 def test_ui_chat_messages_are_rendered_as_text_nodes():
-    response = client.get("/")
+    response = client.get("/ui")
 
     assert response.status_code == 200
     assert "createTextNode" in response.text

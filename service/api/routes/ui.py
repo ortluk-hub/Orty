@@ -1,10 +1,10 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-router = APIRouter(tags=['ui'])
+router = APIRouter(prefix='/ui', tags=['ui'])
 
 
-@router.get('/', response_class=HTMLResponse)
+@router.get('', response_class=HTMLResponse)
 async def ui_home() -> str:
     return """<!doctype html>
 <html lang=\"en\">
