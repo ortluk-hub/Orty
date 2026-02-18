@@ -1,3 +1,9 @@
+## Unreleased
+
+### Changed
+- Switched the default `LLM_PROVIDER` from `openai` to `ollama` so local models are used by default unless overridden by environment configuration.
+- Updated README environment examples to reflect Ollama as the default provider and OpenAI as an optional override.
+
 # Changelog
 
 All notable changes to Orty will be documented in this file.

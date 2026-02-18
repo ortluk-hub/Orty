@@ -1,5 +1,7 @@
 import asyncio
 
+import httpx
+
 from service.ai import AIService
 from service.config import settings
 
@@ -24,7 +26,7 @@ def test_generate_uses_ollama_provider(monkeypatch):
     assert result == "ollama-reply"
 
 
-def test_generate_uses_openai_provider_by_default(monkeypatch):
+def test_generate_uses_openai_provider_when_explicitly_selected(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
 
@@ -160,3 +162,22 @@ def test_generate_rejects_fs_read_path_traversal(tmp_path, monkeypatch):
     result = asyncio.run(service.generate("/tool fs_read ../secret.txt"))
 
     assert "Access denied" in result
+
+
+def test_generate_returns_recoverable_message_when_ollama_is_unreachable(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    async def fake_post(self, *args, **kwargs):
+        raise httpx.ConnectError(
+            "connection refused",
+            request=httpx.Request("POST", f"{settings.OLLAMA_BASE_URL}/api/chat"),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    result = asyncio.run(service.generate("hello"))
+
+    assert "Ollama is not reachable." in result
+    assert settings.OLLAMA_BASE_URL in result
