@@ -34,6 +34,7 @@ All notable changes to Orty will be documented in this file.
 
 
 ### Changed
+- Made the web UI route resilient for both `GET /ui` and `GET /ui/` to avoid 404/redirect edge cases across different clients and proxies.
 - Moved the built-in web UI endpoint from `/` to `/ui` to make the UI route explicit and avoid ambiguity with API-first behavior.
 - Updated API tests and README documentation to use `GET /ui` for the web interface.
 
