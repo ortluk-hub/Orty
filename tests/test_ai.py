@@ -24,7 +24,7 @@ def test_generate_uses_ollama_provider(monkeypatch):
     assert result == "ollama-reply"
 
 
-def test_generate_uses_openai_provider_by_default(monkeypatch):
+def test_generate_uses_openai_provider_when_explicitly_selected(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
 

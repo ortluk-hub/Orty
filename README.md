@@ -140,10 +140,10 @@ Create a `.env` file in the project root:
 
 ```
 ORTY_SHARED_SECRET=your_shared_secret_here
-LLM_PROVIDER=openai
+LLM_PROVIDER=ollama
 OPENAI_API_KEY=your_openai_key_here
 # or for local models
-# LLM_PROVIDER=ollama
+# LLM_PROVIDER=openai
 # OLLAMA_BASE_URL=http://localhost:11434
 # OLLAMA_MODEL=llama3.2
 SQLITE_PATH=data/orty.db
