@@ -198,7 +198,7 @@ docker exec -it ollama ollama pull llama3.2
 
 ### 3. Build and run Orty container
 
-From the Orty repository root:
+From the Orty repository root (`Dockerfile` is included in this repo):
 
 ```bash
 docker build -t orty:local .
@@ -213,8 +213,7 @@ docker run -d \
   -e OLLAMA_MODEL=llama3.2 \
   -e SQLITE_PATH=/app/data/orty.db \
   -v orty_data:/app/data \
-  orty:local \
-  uvicorn main:app --host 0.0.0.0 --port 8080
+  orty:local
 ```
 
 ### 4. Access from clients on the same network
