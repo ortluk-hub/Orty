@@ -22,6 +22,7 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 - Chat endpoint with OpenAI/Ollama provider routing and pluggable provider registry
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
 - SQLite-backed conversation memory with recent-history retrieval
+- Supervisor-managed bot lifecycle APIs with `heartbeat` and `code_review` bot types
 
 ### What comes next
 The next planned milestone is **conversation controls, safer tool contracts, and automation extensions**.
@@ -176,6 +177,13 @@ Tool usage (initial built-in support):
 If a tool command is used, Orty executes the tool first and returns the tool result.
 
 Chat endpoint now supports lightweight memory persistence via SQLite:
+
+Supervisor automation notes:
+
+- `code_review` bots can clone a target repository, inspect configured roadmap text, and emit roadmap-aligned change proposals via `/v1/bots/{bot_id}/events`.
+- The bot can optionally use `conversation_id` memory to weight proposal relevance from recent chat history.
+- Every proposal includes `human_review_required=true`; generated ideas are intended for human-reviewed pull requests before merge.
+
 
 - include optional `conversation_id` in `/chat` requests to continue a thread
 - if omitted, Orty creates a new `conversation_id` and returns it in the response

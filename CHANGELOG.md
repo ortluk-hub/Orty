@@ -5,6 +5,7 @@ All notable changes to Orty will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added a `code_review` supervisor bot type that clones a target repository, reads optional chat memory context, and emits roadmap-aligned change proposals with explicit `human_review_required=true` enforcement for PR gating before merge.
 - Introduced Heavy-Orty supervisor foundation with `/v1` APIs for client registration/authentication and bot lifecycle management (create/start/stop/pause/status/events), while preserving backward-compatible `/health` and `/chat` behavior.
 - Added SQLite-backed supervisor persistence for `clients`, `bots`, and `bot_events` with safe startup initialization, ownership/event indexes, token hashing, and ISO-8601 UTC timestamps.
 - Added a supervisor service layer with bot registry/state-transition checks, asyncio in-process bot runner orchestration, and a sample `heartbeat` bot type that emits periodic heartbeat audit events.

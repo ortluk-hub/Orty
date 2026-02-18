@@ -130,3 +130,55 @@ def test_start_rejects_non_positive_heartbeat_interval():
     bot_response = client.get(f'/v1/bots/{bot_id}', headers=headers)
     assert bot_response.status_code == 200
     assert bot_response.json()['status'] == 'created'
+
+
+def test_code_review_bot_clones_repo_and_emits_human_review_proposals(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    seeded_chat = client.post(
+        '/chat',
+        json={'message': 'We should improve safer tool contracts and add automation hooks.'},
+        headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
+    )
+    assert seeded_chat.status_code == 200
+    conversation_id = seeded_chat.json()['conversation_id']
+
+    created_client = create_client('Code Review Owner')
+    headers = client_headers(created_client)
+
+    create_response = client.post(
+        '/v1/bots',
+        json={
+            'bot_type': 'code_review',
+            'config': {
+                'repository_url': '.',
+                'conversation_id': conversation_id,
+                'roadmap_text': 'Safer, extensible tool contracts\nAutomation + integration expansion',
+                'max_proposals': 2,
+            },
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 200
+    bot_id = create_response.json()['bot_id']
+
+    start_response = client.post(f'/v1/bots/{bot_id}/start', headers=headers)
+    assert start_response.status_code == 200
+
+    time.sleep(2.0)
+
+    events_response = client.get(f'/v1/bots/{bot_id}/events?limit=20', headers=headers)
+    assert events_response.status_code == 200
+    events = events_response.json()
+    event_types = [event['event_type'] for event in events]
+
+    assert 'REVIEW_STARTED' in event_types
+    assert 'REPO_CLONED' in event_types
+    assert 'REVIEW_PROPOSAL' in event_types
+    assert 'REVIEW_COMPLETED' in event_types
+
+    proposal_event = next(event for event in events if event['event_type'] == 'REVIEW_PROPOSAL')
+    assert proposal_event['payload']['human_review_required'] is True
+    assert proposal_event['payload']['considered_memory_messages'] >= 1
+    assert len(proposal_event['payload']['proposals']) == 2
