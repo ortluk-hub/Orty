@@ -33,6 +33,10 @@ All notable changes to Orty will be documented in this file.
 - Refined LLM abstraction in `AIService` with a provider registry, explicit unsupported-provider messaging, and runtime registration support for additional providers.
 
 
+### Changed
+- Moved the built-in web UI endpoint from `/` to `/ui` to make the UI route explicit and avoid ambiguity with API-first behavior.
+- Updated API tests and README documentation to use `GET /ui` for the web interface.
+
 ### Fixed
 - Re-checked GitHub push readiness on `dev`: configured `origin` to `https://github.com/ortluk-hub/Orty.git`, reran unit tests (`9 passed`), and retried `git push -u origin dev`; push is still blocked in this runtime because no interactive HTTPS username/PAT is available.
 - Tried reconfiguring `origin` and pushing `dev` via both HTTPS and SSH; local tests pass, but this runtime cannot reach/authenticate GitHub (`could not read Username` over HTTPS, `port 22: Network is unreachable` over SSH).
