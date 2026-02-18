@@ -77,8 +77,15 @@ def test_ui_home_page_is_available():
     assert "Simple testing interface for chat + conversation continuity." in response.text
 
 
-def test_ui_home_page_trailing_slash_is_also_available():
-    response = client.get("/ui/")
+def test_root_redirects_to_ui():
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui"
+
+
+def test_ui_home_page_trailing_slash_is_also_available_without_redirect():
+    response = client.get("/ui/", follow_redirects=False)
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]

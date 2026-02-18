@@ -3,6 +3,11 @@
 ### Changed
 - Switched the default `LLM_PROVIDER` from `openai` to `ollama` so local models are used by default unless overridden by environment configuration.
 - Updated README environment examples to reflect Ollama as the default provider and OpenAI as an optional override.
+- Added a root-path router redirect from `GET /` to `GET /ui` to prevent Not Found responses when opening the server base URL in browsers or proxies.
+- Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
+
+### Fixed
+- Corrected UI routing wiring so both `GET /ui` and a root access flow (`GET /` -> `/ui`) consistently serve the web UI entrypoint.
 
 # Changelog
 

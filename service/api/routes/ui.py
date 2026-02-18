@@ -1,10 +1,17 @@
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
-router = APIRouter(prefix='/ui', tags=['ui'])
+router = APIRouter(prefix='/ui', tags=['ui'], redirect_slashes=False)
+root_router = APIRouter(tags=['ui'])
+
+
+@root_router.get('/', include_in_schema=False)
+async def root_to_ui() -> RedirectResponse:
+    return RedirectResponse(url='/ui', status_code=307)
 
 
 @router.get('', response_class=HTMLResponse)
+@router.get('/', response_class=HTMLResponse)
 async def ui_home() -> str:
     return """<!doctype html>
 <html lang=\"en\">
