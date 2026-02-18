@@ -66,3 +66,12 @@ def test_chat_reuses_conversation_id(monkeypatch):
 
     assert second.status_code == 200
     assert second.json()["conversation_id"] == first_id
+
+
+def test_ui_home_page_is_available():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Orty Web UI" in response.text
+    assert "Simple testing interface for chat + conversation continuity." in response.text
