@@ -48,16 +48,28 @@ def _build_proposals(focus_areas: list[str], memory_messages: list[dict[str, str
     return proposals
 
 
-def _clone_repo(repository_url: str, branch: str | None) -> str:
+async def _clone_repo(repository_url: str, branch: str | None) -> str:
     tmp_dir = tempfile.mkdtemp(prefix="orty-review-")
     cmd = ["git", "clone", "--depth", "1"]
     if branch:
         cmd.extend(["--branch", branch])
     cmd.extend([repository_url, tmp_dir])
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "Failed to clone repository")
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    try:
+        _, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise RuntimeError("Repository clone timed out")
+
+    if process.returncode != 0:
+        raise RuntimeError(stderr.decode().strip() or "Failed to clone repository")
     return tmp_dir
 
 
@@ -90,7 +102,7 @@ async def run_code_review_bot(
             payload={"repository_url": repository_url, "branch": branch, "human_review_required": True},
         )
 
-        clone_dir = await asyncio.to_thread(_clone_repo, repository_url, branch)
+        clone_dir = await _clone_repo(repository_url, branch)
         event_writer.emit(
             bot_id=bot_id,
             owner_client_id=owner_client_id,
