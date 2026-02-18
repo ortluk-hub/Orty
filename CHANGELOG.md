@@ -8,6 +8,7 @@
 
 ### Fixed
 - Corrected UI routing wiring so both `GET /ui` and a root access flow (`GET /` -> `/ui`) consistently serve the web UI entrypoint.
+- Fixed environment loading so Orty reads `.env` from the repository root reliably and applies it with override semantics, preventing inherited host variables from forcing `openai` when `.env` sets `LLM_PROVIDER=ollama`.
 
 # Changelog
 
