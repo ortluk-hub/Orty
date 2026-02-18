@@ -167,6 +167,76 @@ Expected response:
 {"status": "ok"}
 ```
 
+## Running Orty + LLM in Separate Docker Containers (Same Host)
+
+Use this setup when:
+- Orty API runs in one container
+- Ollama (LLM runtime) runs in a separate container
+- Client devices are on the same LAN and call the Orty host directly
+
+### 1. Create a dedicated Docker network
+
+```bash
+docker network create orty-net
+```
+
+### 2. Start the LLM container (Ollama)
+
+```bash
+docker run -d \
+  --name ollama \
+  --network orty-net \
+  -p 11434:11434 \
+  ollama/ollama
+```
+
+Pull the model you want Orty to use (example: `llama3.2`):
+
+```bash
+docker exec -it ollama ollama pull llama3.2
+```
+
+### 3. Build and run Orty container
+
+From the Orty repository root (`Dockerfile` is included in this repo):
+
+```bash
+docker build -t orty:local .
+
+docker run -d \
+  --name orty \
+  --network orty-net \
+  -p 8080:8080 \
+  -e ORTY_SHARED_SECRET=your_shared_secret_here \
+  -e LLM_PROVIDER=ollama \
+  -e OLLAMA_BASE_URL=http://ollama:11434 \
+  -e OLLAMA_MODEL=llama3.2 \
+  -e SQLITE_PATH=/app/data/orty.db \
+  -v orty_data:/app/data \
+  orty:local
+```
+
+### 4. Access from clients on the same network
+
+Use the Orty host machine IP from client devices:
+
+- Health: `http://<host-ip>:8080/health`
+- Chat: `http://<host-ip>:8080/chat`
+
+Example:
+
+```bash
+curl -X POST "http://<host-ip>:8080/chat" \
+  -H "Content-Type: application/json" \
+  -H "x-orty-secret: your_shared_secret_here" \
+  -d '{"message":"Hello from LAN client"}'
+```
+
+Notes:
+- `OLLAMA_BASE_URL` must use the Ollama container name (`http://ollama:11434`) when both containers are on the same Docker network.
+- Keep port `8080` open on the host firewall for LAN clients.
+- If Orty cannot reach Ollama, verify both containers are on `orty-net` (`docker network inspect orty-net`).
+
 
 
 Tool usage (initial built-in support):
