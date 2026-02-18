@@ -20,5 +20,8 @@ class Settings:
 
     FS_READ_ROOT: str = os.getenv("FS_READ_ROOT", ".")
 
+    BOT_HEARTBEAT_DEFAULT_SECONDS: int = int(os.getenv("BOT_HEARTBEAT_DEFAULT_SECONDS", "10"))
+    BOT_RUNNER_MAX_BOTS: int = int(os.getenv("BOT_RUNNER_MAX_BOTS", "25"))
+
 
 settings = Settings()

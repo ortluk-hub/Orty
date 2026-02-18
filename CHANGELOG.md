@@ -5,6 +5,13 @@ All notable changes to Orty will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Introduced Heavy-Orty supervisor foundation with `/v1` APIs for client registration/authentication and bot lifecycle management (create/start/stop/pause/status/events), while preserving backward-compatible `/health` and `/chat` behavior.
+- Added SQLite-backed supervisor persistence for `clients`, `bots`, and `bot_events` with safe startup initialization, ownership/event indexes, token hashing, and ISO-8601 UTC timestamps.
+- Added a supervisor service layer with bot registry/state-transition checks, asyncio in-process bot runner orchestration, and a sample `heartbeat` bot type that emits periodic heartbeat audit events.
+- Added new API routing structure under `service/api/routes` plus dependency/auth wiring for admin secret auth and client-scoped token auth.
+- Added unit tests covering client token verification, bot lifecycle events (STARTED/HEARTBEAT/STOPPED), ownership-based authorization scoping, and v0.1 endpoint compatibility smoke checks.
+
+### Added
 - Added filesystem tools to `AIService` for local access: `/tool fs_pwd` (current working directory), `/tool fs_list [path]` (directory listing), and `/tool fs_read <path>` (UTF-8 file read).
 - Added unit tests covering filesystem tool behavior and updated unknown-tool messaging to include newly available filesystem tools.
 - Improved SQLite wiring in `MemoryStore` with WAL mode, configurable connection timeout, and a `(conversation_id, id)` index for faster history reads under concurrent usage.
