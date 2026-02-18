@@ -28,6 +28,7 @@ All notable changes to Orty will be documented in this file.
 
 
 ### Fixed
+- Hardened built-in web UI chat rendering against XSS by replacing `innerHTML` interpolation with safe DOM text-node appends (`textContent`/`createTextNode`) so untrusted prompt or reply content is rendered as plain text.
 - Re-checked GitHub push readiness on `dev`: configured `origin` to `https://github.com/ortluk-hub/Orty.git`, reran unit tests (`9 passed`), and retried `git push -u origin dev`; push is still blocked in this runtime because no interactive HTTPS username/PAT is available.
 - Tried reconfiguring `origin` and pushing `dev` via both HTTPS and SSH; local tests pass, but this runtime cannot reach/authenticate GitHub (`could not read Username` over HTTPS, `port 22: Network is unreachable` over SSH).
 - Configured `origin` remote to `https://github.com/ortluk-hub/Orty.git`, verified local sanity checks (`pytest -q`: 9 passed), and attempted `git push -u origin dev`; push is currently blocked in this environment because GitHub HTTPS credentials are unavailable.
