@@ -1,27 +1,33 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+
+DEFAULT_ROOT_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+ROOT_ENV_FILE = Path(os.getenv("ORTY_ENV_FILE", str(DEFAULT_ROOT_ENV_FILE))).expanduser()
+load_dotenv(dotenv_path=ROOT_ENV_FILE, override=True)
 
 
 class Settings:
-    ORTY_SHARED_SECRET: str = os.getenv("ORTY_SHARED_SECRET", "dev-secret")
+    def __init__(self) -> None:
+        self.ORTY_SHARED_SECRET: str = os.getenv("ORTY_SHARED_SECRET", "dev-secret")
 
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
+        self.LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
 
-    OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        self.OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+        self.OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
+        self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
 
-    SQLITE_PATH: str = os.getenv("SQLITE_PATH", "data/orty.db")
-    SQLITE_TIMEOUT_SECONDS: float = float(os.getenv("SQLITE_TIMEOUT_SECONDS", "5"))
+        self.SQLITE_PATH: str = os.getenv("SQLITE_PATH", "data/orty.db")
+        self.SQLITE_TIMEOUT_SECONDS: float = float(os.getenv("SQLITE_TIMEOUT_SECONDS", "5"))
 
-    FS_READ_ROOT: str = os.getenv("FS_READ_ROOT", ".")
+        self.FS_READ_ROOT: str = os.getenv("FS_READ_ROOT", ".")
 
-    BOT_HEARTBEAT_DEFAULT_SECONDS: int = int(os.getenv("BOT_HEARTBEAT_DEFAULT_SECONDS", "10"))
-    BOT_RUNNER_MAX_BOTS: int = int(os.getenv("BOT_RUNNER_MAX_BOTS", "25"))
+        self.BOT_HEARTBEAT_DEFAULT_SECONDS: int = int(os.getenv("BOT_HEARTBEAT_DEFAULT_SECONDS", "10"))
+        self.BOT_RUNNER_MAX_BOTS: int = int(os.getenv("BOT_RUNNER_MAX_BOTS", "25"))
 
 
 settings = Settings()
