@@ -68,7 +68,10 @@ async def ui_home() -> str:
     function appendMessage(role, text) {
       const div = document.createElement('div');
       div.className = `msg ${role}`;
-      div.innerHTML = `<strong>${role === 'user' ? 'You' : 'Orty'}:</strong> ${text}`;
+      const label = document.createElement('strong');
+      label.textContent = role === 'user' ? 'You:' : 'Orty:';
+      div.appendChild(label);
+      div.appendChild(document.createTextNode(` ${text}`));
       chatLog.appendChild(div);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
