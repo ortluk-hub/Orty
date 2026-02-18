@@ -135,7 +135,10 @@ def test_start_rejects_non_positive_heartbeat_interval():
 
 
 def test_code_review_bot_clones_repo_and_emits_human_review_proposals(monkeypatch):
-    monkeypatch.setattr(code_review, "_clone_repo", lambda repository_url, branch: tempfile.mkdtemp(prefix="orty-review-test-"))
+    async def fake_clone_repo(repository_url, branch):
+        return tempfile.mkdtemp(prefix="orty-review-test-")
+
+    monkeypatch.setattr(code_review, "_clone_repo", fake_clone_repo)
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 

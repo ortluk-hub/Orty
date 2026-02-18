@@ -17,16 +17,16 @@ class StubEventWriter:
         self.events.append(kwargs)
 
 
-def test_code_review_bot_clones_repository_via_to_thread(monkeypatch):
+def test_code_review_bot_clones_repository_without_blocking_event_loop(monkeypatch):
     captured = {}
 
-    async def fake_to_thread(func, repository_url, branch):
-        captured["func_name"] = func.__name__
+    async def fake_clone_repo(repository_url, branch):
+        captured["func_name"] = "_clone_repo"
         captured["repository_url"] = repository_url
         captured["branch"] = branch
         return tempfile.mkdtemp(prefix="orty-review-test-")
 
-    monkeypatch.setattr(code_review.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(code_review, "_clone_repo", fake_clone_repo)
 
     writer = StubEventWriter()
 
