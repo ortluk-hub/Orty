@@ -35,6 +35,7 @@ All notable changes to Orty will be documented in this file.
 - Added unit tests for health and chat endpoint behavior (auth required, auth rejection, and no-API-key fallback) so roadmap/documentation changes are validated by executable checks.
 
 ### Documentation
+- Added README instructions for running Orty and Ollama in separate Docker containers on the same host, including LAN client access patterns.
 - Added a README version badge (`v0.1.0-alpha`) for quick project status visibility at a glance.
 - Updated README roadmap/status sections to reflect completed LLM abstraction + built-in tool milestones and to shift near-term planning toward conversation controls, safer tool contracts, and automation extensions.
 - Removed extensive GitHub push/auth/troubleshooting instructions from `README.md`; development workflow docs now stay focused on local branch/merge flow.
