@@ -27,6 +27,11 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 ### What comes next
 The next planned milestone is **conversation controls, safer tool contracts, and automation extensions**.
 
+### User Interface Status
+- Orty now includes a **simple built-in web UI** for quick manual testing.
+- Open `GET /` in a browser to send chat messages, set `x-orty-secret`, and continue conversations via `conversation_id`.
+- The backend remains API-first (`/chat`, `/health`, and `/v1/...` endpoints), with the web UI acting as a lightweight test client.
+
 ---
 
 
