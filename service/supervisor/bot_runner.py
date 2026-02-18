@@ -23,21 +23,32 @@ class BotRunner:
         if len([task for task in self.tasks.values() if not task.done()]) >= settings.BOT_RUNNER_MAX_BOTS:
             raise HTTPException(status_code=409, detail="Bot runner capacity reached")
 
+        task = self._build_task(bot)
+
         self.registry.transition(bot_id, "running", "STARTED")
-        refreshed = self.registry.get_bot(bot_id)
-
-        if refreshed["bot_type"] == "heartbeat":
-            interval = int(refreshed["config"].get("interval_seconds", settings.BOT_HEARTBEAT_DEFAULT_SECONDS))
-            task = asyncio.create_task(
-                self._run_heartbeat(refreshed["bot_id"], refreshed["owner_client_id"], interval),
-                name=f"bot-{bot_id}",
-            )
-        else:
-            self.registry.transition(bot_id, "error", "ERROR")
-            raise HTTPException(status_code=409, detail=f"Unsupported bot type '{refreshed['bot_type']}'")
-
         self.tasks[bot_id] = task
         return self.registry.get_bot(bot_id)
+
+    def _build_task(self, bot: dict) -> asyncio.Task:
+        if bot["bot_type"] == "heartbeat":
+            interval = self._parse_heartbeat_interval(bot)
+            return asyncio.create_task(
+                self._run_heartbeat(bot["bot_id"], bot["owner_client_id"], interval),
+                name=f"bot-{bot['bot_id']}",
+            )
+
+        raise HTTPException(status_code=409, detail=f"Unsupported bot type '{bot['bot_type']}'")
+
+    def _parse_heartbeat_interval(self, bot: dict) -> int:
+        raw_interval = bot["config"].get("interval_seconds", settings.BOT_HEARTBEAT_DEFAULT_SECONDS)
+        try:
+            interval = int(raw_interval)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="interval_seconds must be a positive integer") from exc
+
+        if interval <= 0:
+            raise HTTPException(status_code=422, detail="interval_seconds must be greater than 0")
+        return interval
 
     async def _run_heartbeat(self, bot_id: str, owner_client_id: str, interval: int) -> None:
         try:

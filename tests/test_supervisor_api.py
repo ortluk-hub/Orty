@@ -89,3 +89,44 @@ def test_clients_list_requires_admin_secret():
     authorized = client.get('/v1/clients', headers={'x-orty-secret': settings.ORTY_SHARED_SECRET})
     assert authorized.status_code == 200
     assert isinstance(authorized.json(), list)
+
+def test_start_rejects_unsupported_bot_type_without_transitioning_to_running():
+    created_client = create_client('Unsupported Type Owner')
+    headers = client_headers(created_client)
+
+    create_response = client.post(
+        '/v1/bots',
+        json={'bot_type': 'not_real', 'config': {}},
+        headers=headers,
+    )
+    assert create_response.status_code == 200
+    bot_id = create_response.json()['bot_id']
+
+    start_response = client.post(f'/v1/bots/{bot_id}/start', headers=headers)
+    assert start_response.status_code == 409
+    assert "Unsupported bot type" in start_response.json()['detail']
+
+    bot_response = client.get(f'/v1/bots/{bot_id}', headers=headers)
+    assert bot_response.status_code == 200
+    assert bot_response.json()['status'] == 'created'
+
+
+def test_start_rejects_non_positive_heartbeat_interval():
+    created_client = create_client('Zero Interval Owner')
+    headers = client_headers(created_client)
+
+    create_response = client.post(
+        '/v1/bots',
+        json={'bot_type': 'heartbeat', 'config': {'interval_seconds': 0}},
+        headers=headers,
+    )
+    assert create_response.status_code == 200
+    bot_id = create_response.json()['bot_id']
+
+    start_response = client.post(f'/v1/bots/{bot_id}/start', headers=headers)
+    assert start_response.status_code == 422
+    assert 'interval_seconds must be greater than 0' == start_response.json()['detail']
+
+    bot_response = client.get(f'/v1/bots/{bot_id}', headers=headers)
+    assert bot_response.status_code == 200
+    assert bot_response.json()['status'] == 'created'
