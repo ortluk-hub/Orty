@@ -13,6 +13,7 @@
 - Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
 
 ### Fixed
+- Fixed automation extension target normalization to treat scalar `integration_targets` strings as a single target instead of iterating character-by-character.
 - Guarded supervisor bot config parsing for `history_limit`/`max_proposals` with safe positive-int fallbacks so `null` or invalid values no longer crash planning before events are emitted.
 - Added test coverage for new conversation controls and safer tool contracts to prevent regressions while advancing the next roadmap milestone.
 - Corrected UI routing wiring so both `GET /ui` and a root access flow (`GET /` -> `/ui`) consistently serve the web UI entrypoint.
