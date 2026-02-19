@@ -92,7 +92,7 @@ class AIService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=180) as client:
                 response = await client.post(
                     f"{settings.OLLAMA_BASE_URL}/api/chat",
                     json=payload,

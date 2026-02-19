@@ -18,8 +18,8 @@ class Settings:
         self.OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
         self.OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-        self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
+        self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+        self.OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:4b")
 
         self.SQLITE_PATH: str = os.getenv("SQLITE_PATH", "data/orty.db")
         self.SQLITE_TIMEOUT_SECONDS: float = float(os.getenv("SQLITE_TIMEOUT_SECONDS", "5"))
