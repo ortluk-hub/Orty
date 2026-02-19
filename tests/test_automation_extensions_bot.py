@@ -24,6 +24,11 @@ def test_normalized_targets_deduplicates_and_falls_back():
     assert automation_extensions._normalized_targets([]) == automation_extensions.EXTENSION_FALLBACKS
 
 
+def test_normalized_targets_accepts_scalar_string():
+    assert automation_extensions._normalized_targets("github") == ["github"]
+    assert automation_extensions._normalized_targets(" GitHub ") == ["github"]
+
+
 def test_run_automation_extensions_bot_emits_plan_with_priorities():
     writer = StubEventWriter()
 

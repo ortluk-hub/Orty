@@ -9,9 +9,12 @@ EXTENSION_FALLBACKS = [
 ]
 
 
-def _normalized_targets(raw_targets: list[str] | None) -> list[str]:
+def _normalized_targets(raw_targets: list[str] | str | None) -> list[str]:
     if not raw_targets:
         return EXTENSION_FALLBACKS
+
+    if isinstance(raw_targets, str):
+        raw_targets = [raw_targets]
 
     normalized: list[str] = []
     seen: set[str] = set()
