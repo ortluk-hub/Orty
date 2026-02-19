@@ -11,7 +11,7 @@ import httpx
 from service.config import settings
 
 GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
-ToolFn = Callable[[str], str]
+ToolFn = Callable[[str], Awaitable[str]]
 
 
 class AIService:
@@ -42,7 +42,7 @@ class AIService:
         provider = settings.LLM_PROVIDER.lower()
         history = history or []
 
-        tool_result = self._maybe_execute_tool(message)
+        tool_result = await self._maybe_execute_tool(message)
         if tool_result is not None:
             return tool_result
 
@@ -114,7 +114,7 @@ class AIService:
         data = response.json()
         return data["message"]["content"]
 
-    def _maybe_execute_tool(self, message: str) -> str | None:
+    async def _maybe_execute_tool(self, message: str) -> str | None:
         match = re.match(r"^\s*/tool\s+([a-zA-Z0-9_-]+)(?:\s+(.*))?$", message)
         if not match:
             return None
@@ -127,20 +127,20 @@ class AIService:
             available = ", ".join(sorted(self._tools.keys()))
             return f"Tool '{tool_name}' is not available. Available tools: {available}."
 
-        return tool(tool_input)
+        return await tool(tool_input)
 
-    def _tool_echo(self, tool_input: str) -> str:
+    async def _tool_echo(self, tool_input: str) -> str:
         if not tool_input:
             return "(echo)"
         return tool_input
 
-    def _tool_utc_time(self, _: str) -> str:
+    async def _tool_utc_time(self, _: str) -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    def _tool_fs_pwd(self, _: str) -> str:
+    async def _tool_fs_pwd(self, _: str) -> str:
         return str(Path.cwd())
 
-    def _tool_fs_list(self, tool_input: str) -> str:
+    async def _tool_fs_list(self, tool_input: str) -> str:
         target = Path(tool_input or ".")
 
         try:
@@ -178,7 +178,7 @@ class AIService:
 
         return candidate, None
 
-    def _tool_fs_read(self, tool_input: str) -> str:
+    async def _tool_fs_read(self, tool_input: str) -> str:
         if not tool_input:
             return "Usage: /tool fs_read <path>"
 
@@ -198,14 +198,15 @@ class AIService:
         except OSError as exc:
             return f"Filesystem error: {exc}"
 
-    def _github_get_json(self, endpoint: str) -> dict | list | None:
+    async def _github_get_json(self, endpoint: str) -> dict | list | None:
         url = f"https://api.github.com{endpoint}"
         headers = {
             "Accept": "application/vnd.github+json",
             "User-Agent": "Orty-AIService",
         }
         try:
-            response = httpx.get(url, headers=headers, timeout=15)
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(url, headers=headers)
         except httpx.RequestError as exc:
             return {"error": f"GitHub request failed: {exc}"}
 
@@ -214,12 +215,12 @@ class AIService:
 
         return response.json()
 
-    def _tool_gh_repo(self, tool_input: str) -> str:
+    async def _tool_gh_repo(self, tool_input: str) -> str:
         repo = tool_input.strip()
         if not repo or "/" not in repo:
             return "Usage: /tool gh_repo <owner/repo>"
 
-        data = self._github_get_json(f"/repos/{repo}")
+        data = await self._github_get_json(f"/repos/{repo}")
         if isinstance(data, dict) and data.get("error"):
             return data["error"]
         if not isinstance(data, dict):
@@ -237,7 +238,7 @@ class AIService:
             ]
         )
 
-    def _tool_gh_tree(self, tool_input: str) -> str:
+    async def _tool_gh_tree(self, tool_input: str) -> str:
         if not tool_input.strip():
             return "Usage: /tool gh_tree <owner/repo> [path]"
 
@@ -251,7 +252,7 @@ class AIService:
         if subpath:
             endpoint += f"/{subpath}"
 
-        data = self._github_get_json(endpoint)
+        data = await self._github_get_json(endpoint)
         if isinstance(data, dict) and data.get("error"):
             return data["error"]
         if isinstance(data, dict):
@@ -264,7 +265,7 @@ class AIService:
         items = [f"{item.get('name', '?')}/" if item.get("type") == "dir" else item.get("name", "?") for item in data]
         return "\n".join(items) if items else "(empty)"
 
-    def _tool_gh_file(self, tool_input: str) -> str:
+    async def _tool_gh_file(self, tool_input: str) -> str:
         parts = tool_input.split(maxsplit=2)
         if len(parts) < 2 or "/" not in parts[0]:
             return "Usage: /tool gh_file <owner/repo> <path> [ref]"
@@ -277,7 +278,7 @@ class AIService:
         if ref:
             endpoint = f"{endpoint}?ref={ref}"
 
-        data = self._github_get_json(endpoint)
+        data = await self._github_get_json(endpoint)
         if isinstance(data, dict) and data.get("error"):
             return data["error"]
         if not isinstance(data, dict):
