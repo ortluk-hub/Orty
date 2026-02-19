@@ -30,6 +30,7 @@ class SQLiteDB:
                 """
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    client_id TEXT,
                     conversation_id TEXT NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
@@ -37,6 +38,11 @@ class SQLiteDB:
                 )
                 """
             )
+            message_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()
+            }
+            if "client_id" not in message_columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN client_id TEXT")
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_id
@@ -45,15 +51,31 @@ class SQLiteDB:
             )
             conn.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_messages_client_conversation_id_id
+                ON messages (client_id, conversation_id, id)
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS clients (
                     client_id TEXT PRIMARY KEY,
                     name TEXT,
                     token_hash TEXT NOT NULL,
+                    preferences_json TEXT NOT NULL DEFAULT '{}',
+                    is_primary INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     last_seen_at TEXT
                 )
                 """
             )
+            client_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(clients)").fetchall()
+            }
+            if "preferences_json" not in client_columns:
+                conn.execute("ALTER TABLE clients ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'")
+            if "is_primary" not in client_columns:
+                conn.execute("ALTER TABLE clients ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_is_primary ON clients(is_primary) WHERE is_primary = 1")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS bots (

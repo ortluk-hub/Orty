@@ -1,13 +1,40 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from service.ai import AIService
+from service.api.deps import ensure_primary_client
+from service.memory import MemoryStore
+from service.models.schemas import ChatRequest, ChatResponse
+
 router = APIRouter(prefix='/ui', tags=['ui'], redirect_slashes=False)
 root_router = APIRouter(tags=['ui'])
+ai_service = AIService()
+memory_store = MemoryStore()
 
 
 @root_router.get('/', include_in_schema=False)
 async def root_to_ui() -> RedirectResponse:
     return RedirectResponse(url='/ui', status_code=307)
+
+
+@router.post('/chat', response_model=ChatResponse)
+async def ui_chat(request: ChatRequest):
+    primary = ensure_primary_client()
+    incoming_conversation_id = None if request.reset_conversation else request.conversation_id
+    conversation_id = memory_store.ensure_conversation_id(incoming_conversation_id)
+
+    history = memory_store.get_recent_messages(
+        conversation_id,
+        limit=request.history_limit,
+        client_id=primary['client_id'],
+    )
+    reply = await ai_service.generate(request.message, history=history)
+
+    if request.persist:
+        memory_store.append_message(conversation_id, 'user', request.message, client_id=primary['client_id'])
+        memory_store.append_message(conversation_id, 'assistant', reply, client_id=primary['client_id'])
+
+    return ChatResponse(reply=reply, conversation_id=conversation_id, used_history=len(history))
 
 
 @router.get('', response_class=HTMLResponse)
@@ -25,7 +52,7 @@ async def ui_home() -> str:
     .container { max-width: 880px; margin: 0 auto; padding: 20px; }
     h1 { margin: 0 0 4px; }
     .muted { color: #9fa8b5; margin-bottom: 16px; }
-    .controls { display: grid; gap: 10px; grid-template-columns: 1fr 1fr auto; margin-bottom: 10px; }
+    .controls { display: grid; gap: 10px; grid-template-columns: 1fr auto; margin-bottom: 10px; }
     input, textarea, button { border-radius: 8px; border: 1px solid #2a3444; background: #151c27; color: #e7ecf3; }
     input, textarea { padding: 10px; }
     textarea { width: 100%; min-height: 80px; resize: vertical; }
@@ -40,10 +67,9 @@ async def ui_home() -> str:
 <body>
   <div class=\"container\">
     <h1>Orty Web UI</h1>
-    <p class=\"muted\">Simple testing interface for chat + conversation continuity.</p>
+    <p class=\"muted\">Primary root-user chat interface with conversation continuity.</p>
 
     <div class=\"controls\">
-      <input id=\"secret\" type=\"password\" placeholder=\"x-orty-secret\" />
       <input id=\"conversation-id\" type=\"text\" placeholder=\"conversation_id (optional)\" />
       <button id=\"clear\" type=\"button\">New Conversation</button>
     </div>
@@ -59,7 +85,6 @@ async def ui_home() -> str:
   </div>
 
   <script>
-    const secretInput = document.getElementById('secret');
     const conversationInput = document.getElementById('conversation-id');
     const chatForm = document.getElementById('chat-form');
     const messageInput = document.getElementById('message');
@@ -67,9 +92,7 @@ async def ui_home() -> str:
     const statusEl = document.getElementById('status');
     const clearButton = document.getElementById('clear');
 
-    const savedSecret = localStorage.getItem('orty.secret');
     const savedConversation = localStorage.getItem('orty.conversation_id');
-    if (savedSecret) secretInput.value = savedSecret;
     if (savedConversation) conversationInput.value = savedConversation;
 
     function appendMessage(role, text) {
@@ -92,16 +115,10 @@ async def ui_home() -> str:
     chatForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const message = messageInput.value.trim();
-      const secret = secretInput.value.trim();
       const conversation_id = conversationInput.value.trim();
 
       if (!message) return;
-      if (!secret) {
-        statusEl.textContent = 'Please provide x-orty-secret first.';
-        return;
-      }
 
-      localStorage.setItem('orty.secret', secret);
       appendMessage('user', message);
       messageInput.value = '';
       statusEl.textContent = 'Sending...';
@@ -110,11 +127,10 @@ async def ui_home() -> str:
         const payload = { message };
         if (conversation_id) payload.conversation_id = conversation_id;
 
-        const response = await fetch('/chat', {
+        const response = await fetch('/ui/chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-orty-secret': secret,
           },
           body: JSON.stringify(payload),
         });

@@ -1,12 +1,21 @@
 ## Unreleased
 
+### Added
+- Added an `automation_extensions` supervisor bot type that emits integration-target execution plans (GitHub/Slack/Notion defaults), prioritizes targets found in conversation memory, and marks resulting plans for human-reviewed implementation.
+- Added unit and API tests covering automation extension target normalization, planning events, and supervisor execution flow.
+
 ### Changed
+- Added `/chat` conversation controls: `history_limit` (bounded 1-50), `reset_conversation`, and `persist` flags, and now return `used_history` in `ChatResponse` for observability.
+- Enforced safer tool contracts by rejecting oversized `/tool` input payloads (>2000 chars) and requiring strict `owner/repo` format for GitHub helper tools.
 - Switched the default `LLM_PROVIDER` from `openai` to `ollama` so local models are used by default unless overridden by environment configuration.
 - Updated README environment examples to reflect Ollama as the default provider and OpenAI as an optional override.
 - Added a root-path router redirect from `GET /` to `GET /ui` to prevent Not Found responses when opening the server base URL in browsers or proxies.
 - Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
 
 ### Fixed
+- Fixed automation extension target normalization to treat scalar `integration_targets` strings as a single target instead of iterating character-by-character.
+- Guarded supervisor bot config parsing for `history_limit`/`max_proposals` with safe positive-int fallbacks so `null` or invalid values no longer crash planning before events are emitted.
+- Added test coverage for new conversation controls and safer tool contracts to prevent regressions while advancing the next roadmap milestone.
 - Corrected UI routing wiring so both `GET /ui` and a root access flow (`GET /` -> `/ui`) consistently serve the web UI entrypoint.
 - Fixed environment loading so Orty reads `.env` from the repository root reliably and applies it with override semantics, preventing inherited host variables from forcing `openai` when `.env` sets `LLM_PROVIDER=ollama`.
 
@@ -25,6 +34,8 @@ All notable changes to Orty will be documented in this file.
 - Added unit tests covering client token verification, bot lifecycle events (STARTED/HEARTBEAT/STOPPED), ownership-based authorization scoping, and v0.1 endpoint compatibility smoke checks.
 
 ### Added
+- Added GitHub repository helper tools in `AIService`: `/tool gh_repo <owner/repo>` for repo metadata, `/tool gh_tree <owner/repo> [path]` for directory listings, and `/tool gh_file <owner/repo> <path> [ref]` for reading UTF-8 text files via GitHub's contents API.
+- Added unit tests for GitHub helper tools and updated unknown-tool messaging coverage to include the new `gh_*` tool names.
 - Added filesystem tools to `AIService` for local access: `/tool fs_pwd` (current working directory), `/tool fs_list [path]` (directory listing), and `/tool fs_read <path>` (UTF-8 file read).
 - Added unit tests covering filesystem tool behavior and updated unknown-tool messaging to include newly available filesystem tools.
 - Improved SQLite wiring in `MemoryStore` with WAL mode, configurable connection timeout, and a `(conversation_id, id)` index for faster history reads under concurrent usage.
@@ -73,3 +84,20 @@ All notable changes to Orty will be documented in this file.
 - Clarified which GitHub credentials are required to push after configuring `origin` (HTTPS PAT vs SSH key auth).
 - Clarified development workflow: `git commit` is local, and `git push origin dev` is required to publish commits on GitHub.
 - Added initial changelog file for tracking project evolution.
+
+
+### Changed
+- Refactored authentication to prioritize registered client credentials, while preserving `x-orty-secret` as an admin/root fallback that resolves to a primary client identity.
+- Added per-client preferences support and primary-client metadata in client APIs/storage.
+- Scoped chat-memory persistence and retrieval by client identity to keep conversation state isolated across clients.
+- Added `/ui/chat` and updated the web UI to operate as the primary root-user chat interface without manual secret entry.
+
+
+### Migration Notes
+- SQLite schema migration is automatic at startup: `messages.client_id`, `clients.preferences_json`, and `clients.is_primary` are added if missing.
+
+### Rollback
+- Revert commit `7b4189d` and this follow-up commit to restore the previous auth/UI behavior.
+
+### Changed
+- Restricted `POST /v1/clients` to admin (`x-orty-secret`) to keep client provisioning under primary/root authority.

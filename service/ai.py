@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+import base64
+import inspect
 from pathlib import Path
 import re
 
@@ -10,7 +12,11 @@ import httpx
 from service.config import settings
 
 GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
+ToolResult = str | Awaitable[str]
+ToolFn = Callable[[str], ToolResult]
 ToolFn = Callable[[str], str]
+TOOL_INPUT_MAX_LENGTH = 2000
+REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 class AIService:
@@ -26,6 +32,9 @@ class AIService:
             "fs_pwd": self._tool_fs_pwd,
             "fs_list": self._tool_fs_list,
             "fs_read": self._tool_fs_read,
+            "gh_repo": self._tool_gh_repo,
+            "gh_tree": self._tool_gh_tree,
+            "gh_file": self._tool_gh_file,
         }
 
     def register_provider(self, name: str, generator: GenerateFn) -> None:
@@ -38,7 +47,7 @@ class AIService:
         provider = settings.LLM_PROVIDER.lower()
         history = history or []
 
-        tool_result = self._maybe_execute_tool(message)
+        tool_result = await self._maybe_execute_tool(message)
         if tool_result is not None:
             return tool_result
 
@@ -110,33 +119,41 @@ class AIService:
         data = response.json()
         return data["message"]["content"]
 
-    def _maybe_execute_tool(self, message: str) -> str | None:
+    async def _maybe_execute_tool(self, message: str) -> str | None:
         match = re.match(r"^\s*/tool\s+([a-zA-Z0-9_-]+)(?:\s+(.*))?$", message)
         if not match:
             return None
 
         tool_name = match.group(1).lower()
         tool_input = (match.group(2) or "").strip()
+        if len(tool_input) > TOOL_INPUT_MAX_LENGTH:
+            return (
+                f"Tool input exceeds {TOOL_INPUT_MAX_LENGTH} characters. "
+                "Please provide a shorter input."
+            )
 
         tool = self._tools.get(tool_name)
         if tool is None:
             available = ", ".join(sorted(self._tools.keys()))
             return f"Tool '{tool_name}' is not available. Available tools: {available}."
 
-        return tool(tool_input)
+        output = tool(tool_input)
+        if inspect.isawaitable(output):
+            return await output
+        return output
 
-    def _tool_echo(self, tool_input: str) -> str:
+    async def _tool_echo(self, tool_input: str) -> str:
         if not tool_input:
             return "(echo)"
         return tool_input
 
-    def _tool_utc_time(self, _: str) -> str:
+    async def _tool_utc_time(self, _: str) -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    def _tool_fs_pwd(self, _: str) -> str:
+    async def _tool_fs_pwd(self, _: str) -> str:
         return str(Path.cwd())
 
-    def _tool_fs_list(self, tool_input: str) -> str:
+    async def _tool_fs_list(self, tool_input: str) -> str:
         target = Path(tool_input or ".")
 
         try:
@@ -174,7 +191,7 @@ class AIService:
 
         return candidate, None
 
-    def _tool_fs_read(self, tool_input: str) -> str:
+    async def _tool_fs_read(self, tool_input: str) -> str:
         if not tool_input:
             return "Usage: /tool fs_read <path>"
 
@@ -193,3 +210,103 @@ class AIService:
             return f"File is not UTF-8 text: {target}"
         except OSError as exc:
             return f"Filesystem error: {exc}"
+
+    async def _github_get_json(self, endpoint: str) -> dict | list | None:
+        url = f"https://api.github.com{endpoint}"
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Orty-AIService",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(url, headers=headers)
+        except httpx.RequestError as exc:
+            return {"error": f"GitHub request failed: {exc}"}
+
+        if response.status_code != 200:
+            return {"error": f"GitHub API error ({response.status_code}): {response.text}"}
+
+        return response.json()
+
+    async def _tool_gh_repo(self, tool_input: str) -> str:
+        repo = tool_input.strip()
+        if not REPO_PATTERN.fullmatch(repo):
+            return "Usage: /tool gh_repo <owner/repo>"
+
+        data = await self._github_get_json(f"/repos/{repo}")
+        if isinstance(data, dict) and data.get("error"):
+            return data["error"]
+        if not isinstance(data, dict):
+            return "Unexpected GitHub API response."
+
+        return "\n".join(
+            [
+                f"name: {data.get('full_name', repo)}",
+                f"description: {data.get('description') or '(none)'}",
+                f"default_branch: {data.get('default_branch', '(unknown)')}",
+                f"stars: {data.get('stargazers_count', 0)}",
+                f"forks: {data.get('forks_count', 0)}",
+                f"open_issues: {data.get('open_issues_count', 0)}",
+                f"url: {data.get('html_url', f'https://github.com/{repo}')}",
+            ]
+        )
+
+    async def _tool_gh_tree(self, tool_input: str) -> str:
+        if not tool_input.strip():
+            return "Usage: /tool gh_tree <owner/repo> [path]"
+
+        parts = tool_input.split(maxsplit=1)
+        repo = parts[0]
+        subpath = parts[1].strip() if len(parts) > 1 else ""
+        if not REPO_PATTERN.fullmatch(repo):
+            return "Usage: /tool gh_tree <owner/repo> [path]"
+
+        endpoint = f"/repos/{repo}/contents"
+        if subpath:
+            endpoint += f"/{subpath}"
+
+        data = await self._github_get_json(endpoint)
+        if isinstance(data, dict) and data.get("error"):
+            return data["error"]
+        if isinstance(data, dict):
+            name = data.get("name", subpath or "/")
+            kind = data.get("type", "file")
+            return f"{name} ({kind})"
+        if not isinstance(data, list):
+            return "Unexpected GitHub API response."
+
+        items = [f"{item.get('name', '?')}/" if item.get("type") == "dir" else item.get("name", "?") for item in data]
+        return "\n".join(items) if items else "(empty)"
+
+    async def _tool_gh_file(self, tool_input: str) -> str:
+        parts = tool_input.split(maxsplit=2)
+        if len(parts) < 2 or not REPO_PATTERN.fullmatch(parts[0]):
+            return "Usage: /tool gh_file <owner/repo> <path> [ref]"
+
+        repo = parts[0]
+        file_path = parts[1]
+        ref = parts[2].strip() if len(parts) == 3 else ""
+
+        endpoint = f"/repos/{repo}/contents/{file_path}"
+        if ref:
+            endpoint = f"{endpoint}?ref={ref}"
+
+        data = await self._github_get_json(endpoint)
+        if isinstance(data, dict) and data.get("error"):
+            return data["error"]
+        if not isinstance(data, dict):
+            return "Unexpected GitHub API response."
+        if data.get("type") != "file":
+            return f"Path is not a file: {file_path}"
+
+        content = data.get("content", "")
+        encoding = data.get("encoding", "")
+        if encoding != "base64" or not content:
+            return f"Unsupported GitHub content encoding: {encoding or '(none)'}"
+
+        try:
+            decoded = base64.b64decode(content, validate=False).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return "GitHub file is not valid UTF-8 text."
+
+        return decoded

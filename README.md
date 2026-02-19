@@ -7,8 +7,8 @@ Orty is a modular, on-device AI assistant built with FastAPI and designed for cl
 ## Status
 
 Version: v0.1.0-alpha
-Current Phase: LLM abstraction + built-in tools + SQLite memory
-Next Phase: Conversation controls, safer tool contracts, and automation extensions
+Current Phase: Conversation controls + safer tool contracts
+Next Phase: Automation extensions
 
 ---
 
@@ -18,19 +18,23 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 
 ### What is already in place
 - FastAPI application structure and running server entrypoint
-- Health endpoint and shared-secret request authentication
+- Health endpoint and request authentication via registered clients (with shared-secret root fallback)
 - Chat endpoint with OpenAI/Ollama provider routing and pluggable provider registry
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
 - SQLite-backed conversation memory with recent-history retrieval
-- Supervisor-managed bot lifecycle APIs with `heartbeat` and `code_review` bot types
+- Client-scoped memory and per-client preferences for registered clients
+- Supervisor-managed bot lifecycle APIs with `heartbeat`, `code_review`, and `automation_extensions` bot types
+- Conversation controls in `/chat` (`history_limit`, `reset_conversation`, `persist`)
+- Safer tool contracts with bounded tool input and stricter `owner/repo` validation for GitHub tools
 
 ### What comes next
-The next planned milestone is **conversation controls, safer tool contracts, and automation extensions**.
+The next planned milestone is **automation extensions**.
 
 ### User Interface Status
 - Orty now includes a **simple built-in web UI** for quick manual testing.
-- Open `GET /ui` in a browser to send chat messages, set `x-orty-secret`, and continue conversations via `conversation_id`.
+- Open `GET /ui` in a browser to chat as the primary root client without manually setting secrets, and continue conversations via `conversation_id`.
 - The backend remains API-first (`/chat`, `/health`, and `/v1/...` endpoints), with the web UI acting as a lightweight test client.
+- Creating additional registered clients via `POST /v1/clients` requires the admin shared secret (`x-orty-secret`).
 
 ---
 
@@ -258,6 +262,7 @@ Supervisor automation notes:
 - `code_review` bots can clone a target repository, inspect configured roadmap text, and emit roadmap-aligned change proposals via `/v1/bots/{bot_id}/events`.
 - The bot can optionally use `conversation_id` memory to weight proposal relevance from recent chat history.
 - Every proposal includes `human_review_required=true`; generated ideas are intended for human-reviewed pull requests before merge.
+- `automation_extensions` bots generate integration-target execution plans (for example: GitHub, Slack, and Notion) and raise target priority when chat memory shows explicit demand.
 
 
 - include optional `conversation_id` in `/chat` requests to continue a thread

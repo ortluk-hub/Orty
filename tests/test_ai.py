@@ -64,6 +64,22 @@ def test_generate_can_use_registered_custom_provider(monkeypatch):
     assert result == "mock:hello:1"
 
 
+
+
+def test_generate_executes_sync_custom_tool(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    def sync_tool(tool_input):
+        return f"sync:{tool_input}"
+
+    service.register_tool("sync", sync_tool)
+
+    result = asyncio.run(service.generate("/tool sync hello"))
+
+    assert result == "sync:hello"
+
+
 def test_generate_executes_echo_tool_before_provider(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
@@ -99,7 +115,10 @@ def test_generate_returns_available_tools_for_unknown_tool(monkeypatch):
 
     result = asyncio.run(service.generate("/tool missing"))
 
-    assert result == "Tool 'missing' is not available. Available tools: echo, fs_list, fs_pwd, fs_read, utc_time."
+    assert result == (
+        "Tool 'missing' is not available. Available tools: "
+        "echo, fs_list, fs_pwd, fs_read, gh_file, gh_repo, gh_tree, utc_time."
+    )
 
 
 def test_generate_executes_fs_pwd_tool(monkeypatch):
@@ -181,3 +200,105 @@ def test_generate_returns_recoverable_message_when_ollama_is_unreachable(monkeyp
 
     assert "Ollama is not reachable." in result
     assert settings.OLLAMA_BASE_URL in result
+
+
+def test_generate_executes_gh_repo_tool(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "full_name": "octocat/Hello-World",
+                "description": "test repo",
+                "default_branch": "main",
+                "stargazers_count": 5,
+                "forks_count": 2,
+                "open_issues_count": 1,
+                "html_url": "https://github.com/octocat/Hello-World",
+            }
+
+    
+    async def fake_get(self, *args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    result = asyncio.run(service.generate("/tool gh_repo octocat/Hello-World"))
+
+    assert "name: octocat/Hello-World" in result
+    assert "default_branch: main" in result
+
+
+def test_generate_executes_gh_tree_tool(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return [
+                {"name": "service", "type": "dir"},
+                {"name": "README.md", "type": "file"},
+            ]
+
+    
+    async def fake_get(self, *args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    result = asyncio.run(service.generate("/tool gh_tree octocat/Hello-World"))
+
+    assert "service/" in result
+    assert "README.md" in result
+
+
+def test_generate_executes_gh_file_tool(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "type": "file",
+                "encoding": "base64",
+                "content": "aGVsbG8gZ2l0aHVi",
+            }
+
+    
+    async def fake_get(self, *args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    result = asyncio.run(service.generate("/tool gh_file octocat/Hello-World README.md"))
+
+    assert result == "hello github"
+
+
+def test_generate_rejects_overly_long_tool_input(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    long_input = "x" * 2001
+    result = asyncio.run(service.generate(f"/tool echo {long_input}"))
+
+    assert "Tool input exceeds 2000 characters" in result
+
+
+def test_generate_validates_gh_repo_contract(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    result = asyncio.run(service.generate("/tool gh_repo invalid/repo/name"))
+
+    assert result == "Usage: /tool gh_repo <owner/repo>"

@@ -15,6 +15,14 @@ ROADMAP_FALLBACK = [
 ]
 
 
+def _safe_positive_int(value: object, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
 def _extract_focus_areas(roadmap_text: str) -> list[str]:
     lines = [line.strip(" -\t") for line in roadmap_text.splitlines() if line.strip()]
     if not lines:
@@ -71,14 +79,10 @@ async def run_code_review_bot(
     repository_url = str(config.get("repository_url") or ".")
     branch = str(config.get("branch")) if config.get("branch") else None
     conversation_id = config.get("conversation_id")
-    history_limit = int(config.get("history_limit", 20))
-    max_proposals = int(config.get("max_proposals", 3))
+    history_limit = _safe_positive_int(config.get("history_limit", 20), default=20)
+    max_proposals = _safe_positive_int(config.get("max_proposals", 3), default=3)
     roadmap_text = str(config.get("roadmap_text") or "")
 
-    if history_limit <= 0:
-        history_limit = 20
-    if max_proposals <= 0:
-        max_proposals = 3
 
     clone_dir: str | None = None
     try:
@@ -101,7 +105,11 @@ async def run_code_review_bot(
 
         memory_messages: list[dict[str, str]] = []
         if conversation_id:
-            memory_messages = memory_store.get_recent_messages(str(conversation_id), limit=history_limit)
+            _get_messages = getattr(memory_store, "get_recent_messages")
+            try:
+                memory_messages = _get_messages(str(conversation_id), limit=history_limit, client_id=owner_client_id)
+            except TypeError:
+                memory_messages = _get_messages(str(conversation_id), limit=history_limit)
 
         focus_areas = _extract_focus_areas(roadmap_text)
         proposals = _build_proposals(focus_areas, memory_messages, max_items=max_proposals)

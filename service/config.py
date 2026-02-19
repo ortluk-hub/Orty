@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 
 DEFAULT_ROOT_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 ROOT_ENV_FILE = Path(os.getenv("ORTY_ENV_FILE", str(DEFAULT_ROOT_ENV_FILE))).expanduser()
-load_dotenv(dotenv_path=ROOT_ENV_FILE, override=True)
+# Keep runtime/exported environment variables authoritative and only use
+# values from the env file for missing keys.
+load_dotenv(dotenv_path=ROOT_ENV_FILE, override=False)
 
 
 class Settings:
