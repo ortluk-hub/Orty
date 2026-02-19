@@ -181,3 +181,44 @@ def test_code_review_bot_clones_repo_and_emits_human_review_proposals(monkeypatc
     event_types = [event['event_type'] for event in events]
 
     assert 'REVIEW_STARTED' in event_types
+
+
+def test_automation_extensions_bot_emits_planning_events(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    seeded_chat = client.post(
+        '/chat',
+        json={'message': 'Please add github automation first.'},
+        headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
+    )
+    assert seeded_chat.status_code == 200
+    conversation_id = seeded_chat.json()['conversation_id']
+
+    created_client = create_client('Automation Extensions Owner')
+    headers = client_headers(created_client)
+
+    create_response = client.post(
+        '/v1/bots',
+        json={
+            'bot_type': 'automation_extensions',
+            'config': {
+                'conversation_id': conversation_id,
+                'integration_targets': ['github', 'notion'],
+            },
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 200
+    bot_id = create_response.json()['bot_id']
+
+    start_response = client.post(f'/v1/bots/{bot_id}/start', headers=headers)
+    assert start_response.status_code == 200
+
+    events_response = client.get(f'/v1/bots/{bot_id}/events?limit=20', headers=headers)
+    assert events_response.status_code == 200
+    event_types = [event['event_type'] for event in events_response.json()]
+
+    assert 'AUTOMATION_EXTENSIONS_STARTED' in event_types
+    assert 'AUTOMATION_EXTENSION_PLAN' in event_types
+    assert 'AUTOMATION_EXTENSIONS_COMPLETED' in event_types

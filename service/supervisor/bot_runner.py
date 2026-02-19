@@ -6,7 +6,7 @@ from service.config import settings
 from service.memory import MemoryStore
 from service.storage.bots_repo import BotsRepository
 from service.supervisor.bot_registry import BotRegistry
-from service.supervisor.bot_types import run_code_review_bot, run_heartbeat_bot
+from service.supervisor.bot_types import run_automation_extensions_bot, run_code_review_bot, run_heartbeat_bot
 from service.supervisor.events import BotEventWriter
 
 
@@ -45,6 +45,12 @@ class BotRunner:
                 name=f"bot-{bot['bot_id']}",
             )
 
+        if bot["bot_type"] == "automation_extensions":
+            return asyncio.create_task(
+                self._run_automation_extensions(bot["bot_id"], bot["owner_client_id"], bot["config"]),
+                name=f"bot-{bot['bot_id']}",
+            )
+
         raise HTTPException(status_code=409, detail=f"Unsupported bot type '{bot['bot_type']}'")
 
     def _parse_heartbeat_interval(self, bot: dict) -> int:
@@ -70,6 +76,17 @@ class BotRunner:
     async def _run_code_review(self, bot_id: str, owner_client_id: str, config: dict) -> None:
         try:
             await run_code_review_bot(bot_id, owner_client_id, config, self.memory_store, self.event_writer)
+            self.bots_repo.update_status(bot_id, "stopped")
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # noqa: BLE001
+            self.bots_repo.update_status(bot_id, "error")
+            self.event_writer.emit(bot_id, owner_client_id, "ERROR", message=str(exc))
+
+
+    async def _run_automation_extensions(self, bot_id: str, owner_client_id: str, config: dict) -> None:
+        try:
+            await run_automation_extensions_bot(bot_id, owner_client_id, config, self.memory_store, self.event_writer)
             self.bots_repo.update_status(bot_id, "stopped")
         except asyncio.CancelledError:
             return
