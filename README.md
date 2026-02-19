@@ -7,8 +7,8 @@ Orty is a modular, on-device AI assistant built with FastAPI and designed for cl
 ## Status
 
 Version: v0.1.0-alpha
-Current Phase: LLM abstraction + built-in tools + SQLite memory
-Next Phase: Conversation controls, safer tool contracts, and automation extensions
+Current Phase: Conversation controls + safer tool contracts
+Next Phase: Automation extensions
 
 ---
 
@@ -23,9 +23,11 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
 - SQLite-backed conversation memory with recent-history retrieval
 - Supervisor-managed bot lifecycle APIs with `heartbeat` and `code_review` bot types
+- Conversation controls in `/chat` (`history_limit`, `reset_conversation`, `persist`)
+- Safer tool contracts with bounded tool input and stricter `owner/repo` validation for GitHub tools
 
 ### What comes next
-The next planned milestone is **conversation controls, safer tool contracts, and automation extensions**.
+The next planned milestone is **automation extensions**.
 
 ### User Interface Status
 - Orty now includes a **simple built-in web UI** for quick manual testing.

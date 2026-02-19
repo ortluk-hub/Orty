@@ -1,12 +1,15 @@
 ## Unreleased
 
 ### Changed
+- Added `/chat` conversation controls: `history_limit` (bounded 1-50), `reset_conversation`, and `persist` flags, and now return `used_history` in `ChatResponse` for observability.
+- Enforced safer tool contracts by rejecting oversized `/tool` input payloads (>2000 chars) and requiring strict `owner/repo` format for GitHub helper tools.
 - Switched the default `LLM_PROVIDER` from `openai` to `ollama` so local models are used by default unless overridden by environment configuration.
 - Updated README environment examples to reflect Ollama as the default provider and OpenAI as an optional override.
 - Added a root-path router redirect from `GET /` to `GET /ui` to prevent Not Found responses when opening the server base URL in browsers or proxies.
 - Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
 
 ### Fixed
+- Added test coverage for new conversation controls and safer tool contracts to prevent regressions while advancing the next roadmap milestone.
 - Corrected UI routing wiring so both `GET /ui` and a root access flow (`GET /` -> `/ui`) consistently serve the web UI entrypoint.
 - Fixed environment loading so Orty reads `.env` from the repository root reliably and applies it with override semantics, preventing inherited host variables from forcing `openai` when `.env` sets `LLM_PROVIDER=ollama`.
 
