@@ -205,7 +205,11 @@ def test_generate_executes_gh_repo_tool(monkeypatch):
                 "html_url": "https://github.com/octocat/Hello-World",
             }
 
-    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: FakeResponse())
+    
+    async def fake_get(self, *args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     result = asyncio.run(service.generate("/tool gh_repo octocat/Hello-World"))
 
@@ -227,7 +231,11 @@ def test_generate_executes_gh_tree_tool(monkeypatch):
                 {"name": "README.md", "type": "file"},
             ]
 
-    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: FakeResponse())
+    
+    async def fake_get(self, *args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     result = asyncio.run(service.generate("/tool gh_tree octocat/Hello-World"))
 
@@ -250,7 +258,11 @@ def test_generate_executes_gh_file_tool(monkeypatch):
                 "content": "aGVsbG8gZ2l0aHVi",
             }
 
-    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: FakeResponse())
+    
+    async def fake_get(self, *args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     result = asyncio.run(service.generate("/tool gh_file octocat/Hello-World README.md"))
 
