@@ -1,0 +1,96 @@
+version: 1
+
+# Governs how Orty is allowed to propose or apply changes.
+evolution:
+  mode: 0
+  # 0 = Advisory only (suggest/diff)
+  # 1 = Assisted PR (create branch/PR; no merge)
+  # 2 = Autonomous PR iteration (fix CI failures; no merge)
+  # 3 = Limited auto-merge (pre-approved categories only; all gates pass)
+
+  require_user_approval_for_mode_change: true
+  require_audit_notes: true
+  require_atomic_changes: true
+
+  # Non-negotiable gates before declaring a change "ready"
+  gates:
+    require_tests: true
+    require_lint: false
+    require_typecheck: false
+    require_secret_scan: true
+    require_migration_notes_on_schema_change: true
+    require_rollback_plan: true
+
+  # Only relevant if/when Orty gains GitHub write capability
+  github:
+    allow_write: false
+    allow_open_pr: false
+    allow_push_branches: false
+    protected_branches:
+      - main
+    require_ci_on_pr: true
+    require_review_on_pr: true
+    allow_force_push: false
+    allowed_auto_merge_categories:
+      - docs
+      - formatting
+      - comments
+      - nonfunctional_refactor
+
+# User precedence and consent boundaries
+user_precedence:
+  obey_explicit_user_instructions: true
+  precedence_ladder:
+    - user_hard_constraints
+    - safety_constraints
+    - system_invariants
+    - user_soft_preferences
+    - orty_optimizations
+
+consent_boundaries:
+  require_explicit_approval_for:
+    - github_write
+    - opening_pull_requests
+    - network_calls
+    - background_agents
+    - financial_actions
+    - smart_home_control
+
+network:
+  allow_external_calls: false
+  # If false, Orty must not make external HTTP calls (cloud APIs, downloads, telemetry).
+
+secrets:
+  never_commit:
+    - ".env"
+    - ".env.*"
+  deny_patterns:
+    - "OPENAI_API_KEY"
+    - "GITHUB_TOKEN"
+    - "Bearer "
+    - "-----BEGIN"
+
+testing:
+  runner: pytest
+  require_deterministic_tests: true
+  allow_network_in_tests: false
+
+observability:
+  require_clear_errors: true
+  prefer_structured_logging: true
+
+identity:
+  require_client_id: false
+  allow_multiple_clients: true
+  require_separate_tokens_per_client: false
+
+safe_mode:
+  stop_words:
+    - "stop"
+    - "pause"
+    - "break time"
+    - "do not change anything"
+  behavior:
+    halt_nonessential_actions: true
+    no_repo_edits: true
+    preserve_state: true
