@@ -255,3 +255,22 @@ def test_generate_executes_gh_file_tool(monkeypatch):
     result = asyncio.run(service.generate("/tool gh_file octocat/Hello-World README.md"))
 
     assert result == "hello github"
+
+
+def test_generate_rejects_overly_long_tool_input(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    long_input = "x" * 2001
+    result = asyncio.run(service.generate(f"/tool echo {long_input}"))
+
+    assert "Tool input exceeds 2000 characters" in result
+
+
+def test_generate_validates_gh_repo_contract(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    result = asyncio.run(service.generate("/tool gh_repo invalid/repo/name"))
+
+    assert result == "Usage: /tool gh_repo <owner/repo>"

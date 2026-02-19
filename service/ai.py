@@ -12,6 +12,8 @@ from service.config import settings
 
 GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
 ToolFn = Callable[[str], str]
+TOOL_INPUT_MAX_LENGTH = 2000
+REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 class AIService:
@@ -121,6 +123,11 @@ class AIService:
 
         tool_name = match.group(1).lower()
         tool_input = (match.group(2) or "").strip()
+        if len(tool_input) > TOOL_INPUT_MAX_LENGTH:
+            return (
+                f"Tool input exceeds {TOOL_INPUT_MAX_LENGTH} characters. "
+                "Please provide a shorter input."
+            )
 
         tool = self._tools.get(tool_name)
         if tool is None:
@@ -216,7 +223,7 @@ class AIService:
 
     def _tool_gh_repo(self, tool_input: str) -> str:
         repo = tool_input.strip()
-        if not repo or "/" not in repo:
+        if not REPO_PATTERN.fullmatch(repo):
             return "Usage: /tool gh_repo <owner/repo>"
 
         data = self._github_get_json(f"/repos/{repo}")
@@ -244,7 +251,7 @@ class AIService:
         parts = tool_input.split(maxsplit=1)
         repo = parts[0]
         subpath = parts[1].strip() if len(parts) > 1 else ""
-        if "/" not in repo:
+        if not REPO_PATTERN.fullmatch(repo):
             return "Usage: /tool gh_tree <owner/repo> [path]"
 
         endpoint = f"/repos/{repo}/contents"
@@ -266,7 +273,7 @@ class AIService:
 
     def _tool_gh_file(self, tool_input: str) -> str:
         parts = tool_input.split(maxsplit=2)
-        if len(parts) < 2 or "/" not in parts[0]:
+        if len(parts) < 2 or not REPO_PATTERN.fullmatch(parts[0]):
             return "Usage: /tool gh_file <owner/repo> <path> [ref]"
 
         repo = parts[0]
