@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 import base64
+import inspect
 from pathlib import Path
 import re
 
@@ -11,7 +12,8 @@ import httpx
 from service.config import settings
 
 GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
-ToolFn = Callable[[str], Awaitable[str]]
+ToolResult = str | Awaitable[str]
+ToolFn = Callable[[str], ToolResult]
 
 
 class AIService:
@@ -127,7 +129,10 @@ class AIService:
             available = ", ".join(sorted(self._tools.keys()))
             return f"Tool '{tool_name}' is not available. Available tools: {available}."
 
-        return await tool(tool_input)
+        output = tool(tool_input)
+        if inspect.isawaitable(output):
+            return await output
+        return output
 
     async def _tool_echo(self, tool_input: str) -> str:
         if not tool_input:
