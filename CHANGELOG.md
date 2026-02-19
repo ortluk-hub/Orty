@@ -1,6 +1,8 @@
 ## Unreleased
 
 ### Added
+- Added a lightweight Android thin-client project (`android-thin-client`) with Jetpack Compose chat/settings UI, MVVM state management, Retrofit/OkHttp networking, and a unit-tested repository contract for Orty LAN `/chat` integrations.
+
 - Added an `automation_extensions` supervisor bot type that emits integration-target execution plans (GitHub/Slack/Notion defaults), prioritizes targets found in conversation memory, and marks resulting plans for human-reviewed implementation.
 - Added unit and API tests covering automation extension target normalization, planning events, and supervisor execution flow.
 
@@ -13,6 +15,7 @@
 - Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
 
 ### Fixed
+- Removed `android-thin-client/gradle/wrapper/gradle-wrapper.jar` from version control to keep PRs free of binary artifacts.
 - Fixed automation extension target normalization to treat scalar `integration_targets` strings as a single target instead of iterating character-by-character.
 - Guarded supervisor bot config parsing for `history_limit`/`max_proposals` with safe positive-int fallbacks so `null` or invalid values no longer crash planning before events are emitted.
 - Added test coverage for new conversation controls and safer tool contracts to prevent regressions while advancing the next roadmap milestone.
