@@ -25,6 +25,8 @@ All notable changes to Orty will be documented in this file.
 - Added unit tests covering client token verification, bot lifecycle events (STARTED/HEARTBEAT/STOPPED), ownership-based authorization scoping, and v0.1 endpoint compatibility smoke checks.
 
 ### Added
+- Added GitHub repository helper tools in `AIService`: `/tool gh_repo <owner/repo>` for repo metadata, `/tool gh_tree <owner/repo> [path]` for directory listings, and `/tool gh_file <owner/repo> <path> [ref]` for reading UTF-8 text files via GitHub's contents API.
+- Added unit tests for GitHub helper tools and updated unknown-tool messaging coverage to include the new `gh_*` tool names.
 - Added filesystem tools to `AIService` for local access: `/tool fs_pwd` (current working directory), `/tool fs_list [path]` (directory listing), and `/tool fs_read <path>` (UTF-8 file read).
 - Added unit tests covering filesystem tool behavior and updated unknown-tool messaging to include newly available filesystem tools.
 - Improved SQLite wiring in `MemoryStore` with WAL mode, configurable connection timeout, and a `(conversation_id, id)` index for faster history reads under concurrent usage.
