@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+import base64
 from pathlib import Path
 import re
 
@@ -26,6 +27,9 @@ class AIService:
             "fs_pwd": self._tool_fs_pwd,
             "fs_list": self._tool_fs_list,
             "fs_read": self._tool_fs_read,
+            "gh_repo": self._tool_gh_repo,
+            "gh_tree": self._tool_gh_tree,
+            "gh_file": self._tool_gh_file,
         }
 
     def register_provider(self, name: str, generator: GenerateFn) -> None:
@@ -193,3 +197,102 @@ class AIService:
             return f"File is not UTF-8 text: {target}"
         except OSError as exc:
             return f"Filesystem error: {exc}"
+
+    def _github_get_json(self, endpoint: str) -> dict | list | None:
+        url = f"https://api.github.com{endpoint}"
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Orty-AIService",
+        }
+        try:
+            response = httpx.get(url, headers=headers, timeout=15)
+        except httpx.RequestError as exc:
+            return {"error": f"GitHub request failed: {exc}"}
+
+        if response.status_code != 200:
+            return {"error": f"GitHub API error ({response.status_code}): {response.text}"}
+
+        return response.json()
+
+    def _tool_gh_repo(self, tool_input: str) -> str:
+        repo = tool_input.strip()
+        if not repo or "/" not in repo:
+            return "Usage: /tool gh_repo <owner/repo>"
+
+        data = self._github_get_json(f"/repos/{repo}")
+        if isinstance(data, dict) and data.get("error"):
+            return data["error"]
+        if not isinstance(data, dict):
+            return "Unexpected GitHub API response."
+
+        return "\n".join(
+            [
+                f"name: {data.get('full_name', repo)}",
+                f"description: {data.get('description') or '(none)'}",
+                f"default_branch: {data.get('default_branch', '(unknown)')}",
+                f"stars: {data.get('stargazers_count', 0)}",
+                f"forks: {data.get('forks_count', 0)}",
+                f"open_issues: {data.get('open_issues_count', 0)}",
+                f"url: {data.get('html_url', f'https://github.com/{repo}')}",
+            ]
+        )
+
+    def _tool_gh_tree(self, tool_input: str) -> str:
+        if not tool_input.strip():
+            return "Usage: /tool gh_tree <owner/repo> [path]"
+
+        parts = tool_input.split(maxsplit=1)
+        repo = parts[0]
+        subpath = parts[1].strip() if len(parts) > 1 else ""
+        if "/" not in repo:
+            return "Usage: /tool gh_tree <owner/repo> [path]"
+
+        endpoint = f"/repos/{repo}/contents"
+        if subpath:
+            endpoint += f"/{subpath}"
+
+        data = self._github_get_json(endpoint)
+        if isinstance(data, dict) and data.get("error"):
+            return data["error"]
+        if isinstance(data, dict):
+            name = data.get("name", subpath or "/")
+            kind = data.get("type", "file")
+            return f"{name} ({kind})"
+        if not isinstance(data, list):
+            return "Unexpected GitHub API response."
+
+        items = [f"{item.get('name', '?')}/" if item.get("type") == "dir" else item.get("name", "?") for item in data]
+        return "\n".join(items) if items else "(empty)"
+
+    def _tool_gh_file(self, tool_input: str) -> str:
+        parts = tool_input.split(maxsplit=2)
+        if len(parts) < 2 or "/" not in parts[0]:
+            return "Usage: /tool gh_file <owner/repo> <path> [ref]"
+
+        repo = parts[0]
+        file_path = parts[1]
+        ref = parts[2].strip() if len(parts) == 3 else ""
+
+        endpoint = f"/repos/{repo}/contents/{file_path}"
+        if ref:
+            endpoint = f"{endpoint}?ref={ref}"
+
+        data = self._github_get_json(endpoint)
+        if isinstance(data, dict) and data.get("error"):
+            return data["error"]
+        if not isinstance(data, dict):
+            return "Unexpected GitHub API response."
+        if data.get("type") != "file":
+            return f"Path is not a file: {file_path}"
+
+        content = data.get("content", "")
+        encoding = data.get("encoding", "")
+        if encoding != "base64" or not content:
+            return f"Unsupported GitHub content encoding: {encoding or '(none)'}"
+
+        try:
+            decoded = base64.b64decode(content, validate=False).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return "GitHub file is not valid UTF-8 text."
+
+        return decoded
