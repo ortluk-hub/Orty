@@ -38,6 +38,14 @@ def _build_extension_steps(target: str, memory_text: str) -> list[str]:
     ]
 
 
+def _safe_positive_int(value: object, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
 async def run_automation_extensions_bot(
     bot_id: str,
     owner_client_id: str,
@@ -46,9 +54,7 @@ async def run_automation_extensions_bot(
     event_writer: BotEventWriter,
 ) -> None:
     conversation_id = config.get("conversation_id")
-    history_limit = int(config.get("history_limit", 20))
-    if history_limit <= 0:
-        history_limit = 20
+    history_limit = _safe_positive_int(config.get("history_limit", 20), default=20)
 
     extension_targets = _normalized_targets(config.get("integration_targets"))
     memory_messages: list[dict[str, str]] = []
