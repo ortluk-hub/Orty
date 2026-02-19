@@ -12,7 +12,7 @@ def test_llm_provider_defaults_to_ollama_when_unset(monkeypatch):
     assert config.settings.LLM_PROVIDER == "ollama"
 
 
-def test_dotenv_overrides_existing_env_value(monkeypatch, tmp_path):
+def test_runtime_env_takes_precedence_over_dotenv(monkeypatch, tmp_path):
     env_path = tmp_path / ".env"
     env_path.write_text("LLM_PROVIDER=ollama\n", encoding="utf-8")
 
@@ -23,4 +23,4 @@ def test_dotenv_overrides_existing_env_value(monkeypatch, tmp_path):
 
     reload(config)
 
-    assert config.settings.LLM_PROVIDER == "ollama"
+    assert config.settings.LLM_PROVIDER == "openai"
