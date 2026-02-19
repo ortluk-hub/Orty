@@ -68,6 +68,72 @@ def test_chat_reuses_conversation_id(monkeypatch):
     assert second.json()["conversation_id"] == first_id
 
 
+def test_chat_can_disable_persistence(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    first = client.post(
+        "/chat",
+        json={"message": "ephemeral", "persist": False},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert first.status_code == 200
+    conv_id = first.json()["conversation_id"]
+
+    second = client.post(
+        "/chat",
+        json={"message": "follow-up", "conversation_id": conv_id},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert second.status_code == 200
+    assert second.json()["used_history"] == 0
+
+
+def test_chat_can_reset_conversation(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    first = client.post(
+        "/chat",
+        json={"message": "one"},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+    first_id = first.json()["conversation_id"]
+
+    second = client.post(
+        "/chat",
+        json={"message": "two", "conversation_id": first_id, "reset_conversation": True},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert second.status_code == 200
+    assert second.json()["conversation_id"] != first_id
+    assert second.json()["used_history"] == 0
+
+
+def test_chat_applies_history_limit(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    seed = client.post(
+        "/chat",
+        json={"message": "seed"},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+    conv_id = seed.json()["conversation_id"]
+
+    limited = client.post(
+        "/chat",
+        json={"message": "limited", "conversation_id": conv_id, "history_limit": 1},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert limited.status_code == 200
+    assert limited.json()["used_history"] == 1
+
+
 def test_ui_home_page_is_available():
     response = client.get("/ui")
 
