@@ -1,5 +1,9 @@
 ## Unreleased
 
+### Added
+- Added an `automation_extensions` supervisor bot type that emits integration-target execution plans (GitHub/Slack/Notion defaults), prioritizes targets found in conversation memory, and marks resulting plans for human-reviewed implementation.
+- Added unit and API tests covering automation extension target normalization, planning events, and supervisor execution flow.
+
 ### Changed
 - Added `/chat` conversation controls: `history_limit` (bounded 1-50), `reset_conversation`, and `persist` flags, and now return `used_history` in `ChatResponse` for observability.
 - Enforced safer tool contracts by rejecting oversized `/tool` input payloads (>2000 chars) and requiring strict `owner/repo` format for GitHub helper tools.
