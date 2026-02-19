@@ -17,20 +17,29 @@ class ChatResponse(BaseModel):
 
 class ClientCreateRequest(BaseModel):
     name: str | None = None
+    preferences: dict = Field(default_factory=dict)
 
 
 class ClientCreateResponse(BaseModel):
     client_id: str
     client_token: str
     name: str | None = None
+    preferences: dict = Field(default_factory=dict)
+    is_primary: bool = False
     created_at: str
 
 
 class ClientSummaryResponse(BaseModel):
     client_id: str
     name: str | None = None
+    preferences: dict = Field(default_factory=dict)
+    is_primary: bool = False
     created_at: str
     last_seen_at: str | None = None
+
+
+class ClientPreferencesUpdateRequest(BaseModel):
+    preferences: dict = Field(default_factory=dict)
 
 
 class BotCreateRequest(BaseModel):
