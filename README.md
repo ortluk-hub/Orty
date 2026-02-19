@@ -18,10 +18,11 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 
 ### What is already in place
 - FastAPI application structure and running server entrypoint
-- Health endpoint and shared-secret request authentication
+- Health endpoint and request authentication via registered clients (with shared-secret root fallback)
 - Chat endpoint with OpenAI/Ollama provider routing and pluggable provider registry
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
 - SQLite-backed conversation memory with recent-history retrieval
+- Client-scoped memory and per-client preferences for registered clients
 - Supervisor-managed bot lifecycle APIs with `heartbeat`, `code_review`, and `automation_extensions` bot types
 - Conversation controls in `/chat` (`history_limit`, `reset_conversation`, `persist`)
 - Safer tool contracts with bounded tool input and stricter `owner/repo` validation for GitHub tools
@@ -31,8 +32,9 @@ The next planned milestone is **automation extensions**.
 
 ### User Interface Status
 - Orty now includes a **simple built-in web UI** for quick manual testing.
-- Open `GET /ui` in a browser to send chat messages, set `x-orty-secret`, and continue conversations via `conversation_id`.
+- Open `GET /ui` in a browser to chat as the primary root client without manually setting secrets, and continue conversations via `conversation_id`.
 - The backend remains API-first (`/chat`, `/health`, and `/v1/...` endpoints), with the web UI acting as a lightweight test client.
+- Creating additional registered clients via `POST /v1/clients` requires the admin shared secret (`x-orty-secret`).
 
 ---
 

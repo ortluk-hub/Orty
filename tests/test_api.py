@@ -14,10 +14,10 @@ def test_health_endpoint_returns_ok_and_assistant_name():
     assert response.json() == {"status": "ok", "assistant": "Orty"}
 
 
-def test_chat_requires_shared_secret_header():
+def test_chat_requires_registered_client_or_shared_secret():
     response = client.post("/chat", json={"message": "hello"})
 
-    assert response.status_code == 422
+    assert response.status_code == 401
 
 
 def test_chat_rejects_invalid_shared_secret():
@@ -140,7 +140,7 @@ def test_ui_home_page_is_available():
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Orty Web UI" in response.text
-    assert "Simple testing interface for chat + conversation continuity." in response.text
+    assert "Primary root-user chat interface with conversation continuity." in response.text
 
 
 def test_root_redirects_to_ui():
@@ -162,3 +162,12 @@ def test_ui_chat_messages_are_rendered_as_text_nodes():
     assert response.status_code == 200
     assert "createTextNode" in response.text
     assert "div.innerHTML" not in response.text
+
+
+def test_ui_chat_uses_primary_client_auth_without_secret(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    response = client.post("/ui/chat", json={"message": "hello root"})
+    assert response.status_code == 200
+    assert response.json()["conversation_id"]

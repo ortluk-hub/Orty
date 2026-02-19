@@ -62,7 +62,11 @@ async def run_automation_extensions_bot(
     extension_targets = _normalized_targets(config.get("integration_targets"))
     memory_messages: list[dict[str, str]] = []
     if conversation_id:
-        memory_messages = memory_store.get_recent_messages(str(conversation_id), limit=history_limit)
+        _get_messages = getattr(memory_store, "get_recent_messages")
+        try:
+            memory_messages = _get_messages(str(conversation_id), limit=history_limit, client_id=owner_client_id)
+        except TypeError:
+            memory_messages = _get_messages(str(conversation_id), limit=history_limit)
     memory_text = "\n".join(message.get("content", "") for message in memory_messages).lower()
 
     event_writer.emit(

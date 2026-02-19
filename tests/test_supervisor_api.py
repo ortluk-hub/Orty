@@ -13,7 +13,7 @@ client = TestClient(app)
 
 
 def create_client(name: str) -> dict:
-    response = client.post('/v1/clients', json={'name': name})
+    response = client.post('/v1/clients', json={'name': name}, headers={'x-orty-secret': settings.ORTY_SHARED_SECRET})
     assert response.status_code == 200
     return response.json()
 
@@ -24,6 +24,12 @@ def client_headers(client_data: dict) -> dict:
         'x-orty-client-token': client_data['client_token'],
     }
 
+
+
+
+def test_client_creation_requires_admin_secret():
+    unauthorized = client.post('/v1/clients', json={'name': 'No Secret'})
+    assert unauthorized.status_code == 422
 
 def test_client_creation_and_token_verification():
     created = create_client('Kitchen Tablet')
@@ -222,3 +228,43 @@ def test_automation_extensions_bot_emits_planning_events(monkeypatch):
     assert 'AUTOMATION_EXTENSIONS_STARTED' in event_types
     assert 'AUTOMATION_EXTENSION_PLAN' in event_types
     assert 'AUTOMATION_EXTENSIONS_COMPLETED' in event_types
+
+
+def test_client_preferences_and_scoped_chat_memory(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    client_a = create_client('Scoped A')
+    client_b = create_client('Scoped B')
+
+    update_a = client.patch('/v1/clients/me/preferences', json={'preferences': {'theme': 'dark'}}, headers=client_headers(client_a))
+    assert update_a.status_code == 200
+    assert update_a.json()['preferences'] == {'theme': 'dark'}
+
+    shared_conversation_id = 'shared-conversation'
+
+    chat_a = client.post('/chat', json={'message': 'alpha', 'conversation_id': shared_conversation_id}, headers=client_headers(client_a))
+    assert chat_a.status_code == 200
+
+    chat_b = client.post('/chat', json={'message': 'beta', 'conversation_id': shared_conversation_id}, headers=client_headers(client_b))
+    assert chat_b.status_code == 200
+
+    history_a = client.post('/chat', json={'message': 'next-a', 'conversation_id': shared_conversation_id}, headers=client_headers(client_a))
+    history_b = client.post('/chat', json={'message': 'next-b', 'conversation_id': shared_conversation_id}, headers=client_headers(client_b))
+
+    assert history_a.status_code == 200
+    assert history_b.status_code == 200
+    assert history_a.json()['used_history'] == 2
+    assert history_b.json()['used_history'] == 2
+
+
+def test_shared_secret_chat_uses_primary_client(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    response = client.post('/chat', json={'message': 'root start'}, headers={'x-orty-secret': settings.ORTY_SHARED_SECRET})
+    assert response.status_code == 200
+
+    clients_response = client.get('/v1/clients', headers={'x-orty-secret': settings.ORTY_SHARED_SECRET})
+    assert clients_response.status_code == 200
+    assert any(c['is_primary'] for c in clients_response.json())

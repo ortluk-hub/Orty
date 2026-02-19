@@ -16,24 +16,41 @@ class MemoryStore:
             return conversation_id
         return str(uuid4())
 
-    def append_message(self, conversation_id: str, role: str, content: str) -> None:
+    def append_message(self, conversation_id: str, role: str, content: str, client_id: str | None = None) -> None:
         with self._connect() as conn:
             conn.execute(
-                'INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)',
-                (conversation_id, role, content),
+                'INSERT INTO messages (client_id, conversation_id, role, content) VALUES (?, ?, ?, ?)',
+                (client_id, conversation_id, role, content),
             )
 
-    def get_recent_messages(self, conversation_id: str, limit: int = 10) -> List[dict[str, str]]:
+    def get_recent_messages(
+        self,
+        conversation_id: str,
+        limit: int = 10,
+        client_id: str | None = None,
+    ) -> List[dict[str, str]]:
         with self._connect() as conn:
-            rows = conn.execute(
-                '''
-                SELECT role, content
-                FROM messages
-                WHERE conversation_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-                ''',
-                (conversation_id, limit),
-            ).fetchall()
+            if client_id is None:
+                rows = conn.execute(
+                    '''
+                    SELECT role, content
+                    FROM messages
+                    WHERE conversation_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    ''',
+                    (conversation_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    '''
+                    SELECT role, content
+                    FROM messages
+                    WHERE conversation_id = ? AND client_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    ''',
+                    (conversation_id, client_id, limit),
+                ).fetchall()
 
         return [{"role": row[0], "content": row[1]} for row in reversed(rows)]

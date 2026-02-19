@@ -84,3 +84,20 @@ All notable changes to Orty will be documented in this file.
 - Clarified which GitHub credentials are required to push after configuring `origin` (HTTPS PAT vs SSH key auth).
 - Clarified development workflow: `git commit` is local, and `git push origin dev` is required to publish commits on GitHub.
 - Added initial changelog file for tracking project evolution.
+
+
+### Changed
+- Refactored authentication to prioritize registered client credentials, while preserving `x-orty-secret` as an admin/root fallback that resolves to a primary client identity.
+- Added per-client preferences support and primary-client metadata in client APIs/storage.
+- Scoped chat-memory persistence and retrieval by client identity to keep conversation state isolated across clients.
+- Added `/ui/chat` and updated the web UI to operate as the primary root-user chat interface without manual secret entry.
+
+
+### Migration Notes
+- SQLite schema migration is automatic at startup: `messages.client_id`, `clients.preferences_json`, and `clients.is_primary` are added if missing.
+
+### Rollback
+- Revert commit `7b4189d` and this follow-up commit to restore the previous auth/UI behavior.
+
+### Changed
+- Restricted `POST /v1/clients` to admin (`x-orty-secret`) to keep client provisioning under primary/root authority.

@@ -105,7 +105,11 @@ async def run_code_review_bot(
 
         memory_messages: list[dict[str, str]] = []
         if conversation_id:
-            memory_messages = memory_store.get_recent_messages(str(conversation_id), limit=history_limit)
+            _get_messages = getattr(memory_store, "get_recent_messages")
+            try:
+                memory_messages = _get_messages(str(conversation_id), limit=history_limit, client_id=owner_client_id)
+            except TypeError:
+                memory_messages = _get_messages(str(conversation_id), limit=history_limit)
 
         focus_areas = _extract_focus_areas(roadmap_text)
         proposals = _build_proposals(focus_areas, memory_messages, max_items=max_proposals)
