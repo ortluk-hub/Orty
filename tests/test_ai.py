@@ -64,6 +64,22 @@ def test_generate_can_use_registered_custom_provider(monkeypatch):
     assert result == "mock:hello:1"
 
 
+
+
+def test_generate_executes_sync_custom_tool(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+
+    def sync_tool(tool_input):
+        return f"sync:{tool_input}"
+
+    service.register_tool("sync", sync_tool)
+
+    result = asyncio.run(service.generate("/tool sync hello"))
+
+    assert result == "sync:hello"
+
+
 def test_generate_executes_echo_tool_before_provider(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
