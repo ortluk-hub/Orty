@@ -4,17 +4,18 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.runtime.getValue
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.orty.thinclient.data.ChatRepository
 import com.orty.thinclient.data.ConfigStore
 import com.orty.thinclient.ui.ChatScreen
+import com.orty.thinclient.ui.CommandCenterScreen
 import com.orty.thinclient.ui.SettingsScreen
 import com.orty.thinclient.ui.theme.OrtyTheme
 import com.orty.thinclient.viewmodel.ChatViewModel
-import androidx.compose.runtime.collectAsState
+import com.orty.thinclient.voice.AndroidTextToSpeechEngine
+import com.orty.thinclient.voice.NoOpVoiceRecognitionEngine
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,26 +23,43 @@ class MainActivity : ComponentActivity() {
 
         val repository = ChatRepository()
         val configStore = ConfigStore(applicationContext)
+        val ttsEngine = AndroidTextToSpeechEngine(applicationContext)
+        val voiceEngine = NoOpVoiceRecognitionEngine()
 
         setContent {
             OrtyTheme {
                 val navController = rememberNavController()
                 val vm: ChatViewModel = viewModel(
-                    factory = ChatViewModel.factory(repository, configStore)
+                    factory = ChatViewModel.factory(repository, configStore, voiceEngine, ttsEngine)
                 )
-                val state by vm.uiState.collectAsState()
 
                 NavHost(navController = navController, startDestination = "chat") {
                     composable("chat") {
+                        val state = vm.uiState.value
                         ChatScreen(
                             state = state,
                             onInputChanged = vm::onInputChanged,
                             onSend = vm::sendMessage,
                             onSettings = { navController.navigate("settings") },
+                            onCommands = { navController.navigate("commands") },
+                            onVoiceInput = vm::startVoiceInput,
+                            onStopVoice = vm::stopVoiceInput,
                             onErrorConsumed = vm::clearError
                         )
                     }
+                    composable("commands") {
+                        val state = vm.uiState.value
+                        CommandCenterScreen(
+                            selectedCommand = state.selectedCommand,
+                            input = state.input,
+                            onBack = { navController.popBackStack() },
+                            onSelectCommand = vm::setSelectedCommand,
+                            onInputChanged = vm::onInputChanged,
+                            onExecute = vm::sendMessage
+                        )
+                    }
                     composable("settings") {
+                        val state = vm.uiState.value
                         SettingsScreen(
                             config = state.config,
                             onSave = vm::saveConfig,

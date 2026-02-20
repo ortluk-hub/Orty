@@ -1,6 +1,10 @@
 ## Unreleased
 
 ### Added
+- Refined the Android thin client UI with a polished command-centric experience, including a dedicated Command Center route and command modes for chat, task scheduling, reminders, alarms, and timers.
+- Added assistant command API plumbing for `/assistant/{command}` so major assistant actions can be routed to native integrations through backend bridges.
+- Added pluggable voice interfaces (`VoiceRecognitionEngine`, `TextToSpeechEngine`) with default implementations and Android TTS integration for spoken assistant responses.
+
 - Added a lightweight Android thin-client project (`android-thin-client`) with Jetpack Compose chat/settings UI, MVVM state management, Retrofit/OkHttp networking, and a unit-tested repository contract for Orty LAN `/chat` integrations.
 
 - Added an `automation_extensions` supervisor bot type that emits integration-target execution plans (GitHub/Slack/Notion defaults), prioritizes targets found in conversation memory, and marks resulting plans for human-reviewed implementation.
@@ -15,7 +19,6 @@
 - Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
 
 ### Fixed
-- Fixed Android thin-client chat input state wiring by collecting `ChatViewModel.uiState` as Compose state so text field edits and message updates recompose correctly.
 - Removed `android-thin-client/gradle/wrapper/gradle-wrapper.jar` from version control to keep PRs free of binary artifacts.
 - Fixed automation extension target normalization to treat scalar `integration_targets` strings as a single target instead of iterating character-by-character.
 - Guarded supervisor bot config parsing for `history_limit`/`max_proposals` with safe positive-int fallbacks so `null` or invalid values no longer crash planning before events are emitted.
