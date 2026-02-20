@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.orty.thinclient"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.orty.thinclient"
@@ -51,10 +51,12 @@ android {
 }
 
 dependencies {
+    implementation("androidx.lifecycle:lifecycle-runtime-compose-android:2.10.0")
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    implementation("com.google.android.material:material:1.12.0")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")

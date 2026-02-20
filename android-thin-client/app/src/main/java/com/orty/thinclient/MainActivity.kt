@@ -3,6 +3,7 @@ package com.orty.thinclient
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -29,13 +30,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             OrtyTheme {
                 val navController = rememberNavController()
+
                 val vm: ChatViewModel = viewModel(
                     factory = ChatViewModel.factory(repository, configStore, voiceEngine, ttsEngine)
                 )
 
+                // ✅ Critical fix: subscribe Compose to uiState updates (StateFlow -> Compose State)
+                val state = vm.uiState.collectAsStateWithLifecycle().value
+
                 NavHost(navController = navController, startDestination = "chat") {
                     composable("chat") {
-                        val state = vm.uiState.value
                         ChatScreen(
                             state = state,
                             onInputChanged = vm::onInputChanged,
@@ -48,7 +52,6 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable("commands") {
-                        val state = vm.uiState.value
                         CommandCenterScreen(
                             selectedCommand = state.selectedCommand,
                             input = state.input,
@@ -59,7 +62,6 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable("settings") {
-                        val state = vm.uiState.value
                         SettingsScreen(
                             config = state.config,
                             onSave = vm::saveConfig,
