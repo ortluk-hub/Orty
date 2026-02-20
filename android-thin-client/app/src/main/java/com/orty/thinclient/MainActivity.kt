@@ -10,9 +10,12 @@ import androidx.navigation.compose.rememberNavController
 import com.orty.thinclient.data.ChatRepository
 import com.orty.thinclient.data.ConfigStore
 import com.orty.thinclient.ui.ChatScreen
+import com.orty.thinclient.ui.CommandCenterScreen
 import com.orty.thinclient.ui.SettingsScreen
 import com.orty.thinclient.ui.theme.OrtyTheme
 import com.orty.thinclient.viewmodel.ChatViewModel
+import com.orty.thinclient.voice.AndroidTextToSpeechEngine
+import com.orty.thinclient.voice.NoOpVoiceRecognitionEngine
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,12 +23,14 @@ class MainActivity : ComponentActivity() {
 
         val repository = ChatRepository()
         val configStore = ConfigStore(applicationContext)
+        val ttsEngine = AndroidTextToSpeechEngine(applicationContext)
+        val voiceEngine = NoOpVoiceRecognitionEngine()
 
         setContent {
             OrtyTheme {
                 val navController = rememberNavController()
                 val vm: ChatViewModel = viewModel(
-                    factory = ChatViewModel.factory(repository, configStore)
+                    factory = ChatViewModel.factory(repository, configStore, voiceEngine, ttsEngine)
                 )
 
                 NavHost(navController = navController, startDestination = "chat") {
@@ -36,7 +41,21 @@ class MainActivity : ComponentActivity() {
                             onInputChanged = vm::onInputChanged,
                             onSend = vm::sendMessage,
                             onSettings = { navController.navigate("settings") },
+                            onCommands = { navController.navigate("commands") },
+                            onVoiceInput = vm::startVoiceInput,
+                            onStopVoice = vm::stopVoiceInput,
                             onErrorConsumed = vm::clearError
+                        )
+                    }
+                    composable("commands") {
+                        val state = vm.uiState.value
+                        CommandCenterScreen(
+                            selectedCommand = state.selectedCommand,
+                            input = state.input,
+                            onBack = { navController.popBackStack() },
+                            onSelectCommand = vm::setSelectedCommand,
+                            onInputChanged = vm::onInputChanged,
+                            onExecute = vm::sendMessage
                         )
                     }
                     composable("settings") {

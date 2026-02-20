@@ -26,4 +26,35 @@ class ChatRepository {
             }
         }
     }
+
+    suspend fun executeAssistantCommand(
+        config: OrtyConfig,
+        command: AssistantCommand
+    ): Result<AssistantCommandResponse> {
+        return withContext(Dispatchers.IO) {
+            if (command.utterance.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Command cannot be empty."))
+            }
+            if (config.secret.isBlank()) {
+                return@withContext Result.failure(IllegalStateException("Secret is required in Settings."))
+            }
+
+            try {
+                val response = NetworkClientFactory.create(config.baseUrl)
+                    .executeAssistantCommand(
+                        secret = config.secret,
+                        command = command.type.name.lowercase(),
+                        request = AssistantCommandRequest(
+                            type = command.type.name.lowercase(),
+                            utterance = command.utterance.trim()
+                        )
+                    )
+                Result.success(response)
+            } catch (ioe: IOException) {
+                Result.failure(IOException("Unable to reach assistant command API.", ioe))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
 }
