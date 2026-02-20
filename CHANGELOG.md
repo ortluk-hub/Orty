@@ -1,6 +1,10 @@
 ## Unreleased
 
 ### Added
+- Refined the Android thin client UI with a polished command-centric experience, including a dedicated Command Center route and command modes for chat, task scheduling, reminders, alarms, and timers.
+- Added assistant command API plumbing for `/assistant/{command}` so major assistant actions can be routed to native integrations through backend bridges.
+- Added pluggable voice interfaces (`VoiceRecognitionEngine`, `TextToSpeechEngine`) with default implementations and Android TTS integration for spoken assistant responses.
+
 - Added a lightweight Android thin-client project (`android-thin-client`) with Jetpack Compose chat/settings UI, MVVM state management, Retrofit/OkHttp networking, and a unit-tested repository contract for Orty LAN `/chat` integrations.
 
 - Added an `automation_extensions` supervisor bot type that emits integration-target execution plans (GitHub/Slack/Notion defaults), prioritizes targets found in conversation memory, and marks resulting plans for human-reviewed implementation.

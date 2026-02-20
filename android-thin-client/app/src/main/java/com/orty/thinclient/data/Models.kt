@@ -9,6 +9,29 @@ data class ChatResponse(
     val conversation_id: String
 )
 
+enum class AssistantCommandType {
+    CHAT,
+    TASK,
+    REMINDER,
+    ALARM,
+    TIMER
+}
+
+data class AssistantCommandRequest(
+    val type: String,
+    val utterance: String
+)
+
+data class AssistantCommandResponse(
+    val status: String,
+    val message: String
+)
+
+data class AssistantCommand(
+    val type: AssistantCommandType,
+    val utterance: String
+)
+
 data class ChatMessage(
     val text: String,
     val isUser: Boolean
