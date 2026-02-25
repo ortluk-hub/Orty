@@ -23,7 +23,7 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
 - SQLite-backed conversation memory with recent-history retrieval
 - Client-scoped memory and per-client preferences for registered clients
-- Supervisor-managed bot lifecycle APIs with `heartbeat`, `code_review`, and `automation_extensions` bot types
+- Supervisor-managed bot lifecycle APIs with `heartbeat`, `code_review`, `automation_extensions`, and `codey` bot types
 - Conversation controls in `/chat` (`history_limit`, `reset_conversation`, `persist`)
 - Safer tool contracts with bounded tool input and stricter `owner/repo` validation for GitHub tools
 
@@ -38,6 +38,35 @@ The next planned milestone is **automation extensions**.
 
 ---
 
+
+
+### Codey coding-agent planning bot
+
+Orty now includes a `codey` supervisor bot type that drafts an implementation plan for a coding agent architecture. The plan includes:
+- Intent resolver + mode routing model stack
+- Cloud primary LLM with local fallback strategy
+- Docker sandbox execution policy and restricted network scope
+- Alembic-based memory/context management notes
+- Mode-specific system prompts for conversation, architecture, code generation, code review, and debugging
+
+Create and run via the supervisor APIs:
+
+```bash
+POST /v1/bots
+{
+  "bot_type": "codey",
+  "config": {
+    "working_title": "Codey",
+    "intent_model": "gwen3:0.6b",
+    "main_model": "qwen3-coder:480b",
+    "fallback_model": "qwen2.5:1.5b"
+  }
+}
+```
+
+After `POST /v1/bots/{bot_id}/start`, inspect `GET /v1/bots/{bot_id}/events` for `CODEY_*` planning events and architecture payloads.
+
+---
 
 ## Architecture Overview
 

@@ -268,3 +268,36 @@ def test_shared_secret_chat_uses_primary_client(monkeypatch):
     clients_response = client.get('/v1/clients', headers={'x-orty-secret': settings.ORTY_SHARED_SECRET})
     assert clients_response.status_code == 200
     assert any(c['is_primary'] for c in clients_response.json())
+
+
+def test_codey_bot_emits_architecture_events(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    created_client = create_client('Codey Owner')
+    headers = client_headers(created_client)
+
+    create_response = client.post(
+        '/v1/bots',
+        json={
+            'bot_type': 'codey',
+            'config': {
+                'working_title': 'Codey',
+                'modes': ['conversation', 'architecture', 'debugging'],
+            },
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 200
+    bot_id = create_response.json()['bot_id']
+
+    start_response = client.post(f'/v1/bots/{bot_id}/start', headers=headers)
+    assert start_response.status_code == 200
+
+    events_response = client.get(f'/v1/bots/{bot_id}/events?limit=20', headers=headers)
+    assert events_response.status_code == 200
+    event_types = [event['event_type'] for event in events_response.json()]
+
+    assert 'CODEY_PLANNING_STARTED' in event_types
+    assert 'CODEY_ARCHITECTURE_DRAFTED' in event_types
+    assert 'CODEY_COMPLETED' in event_types
