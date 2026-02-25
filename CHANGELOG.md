@@ -1,6 +1,7 @@
 ## Unreleased
 
 ### Added
+- Added a new `codey` supervisor bot type that drafts a coding-agent architecture plan with intent-resolver routing, mode-scoped system prompts, cloud/local model fallback strategy, Docker sandbox policy, and restricted network guidance.
 - Refined the Android thin client UI with a polished command-centric experience, including a dedicated Command Center route and command modes for chat, task scheduling, reminders, alarms, and timers.
 - Added assistant command API plumbing for `/assistant/{command}` so major assistant actions can be routed to native integrations through backend bridges.
 - Added pluggable voice interfaces (`VoiceRecognitionEngine`, `TextToSpeechEngine`) with default implementations and Android TTS integration for spoken assistant responses.
@@ -11,6 +12,7 @@
 - Added unit and API tests covering automation extension target normalization, planning events, and supervisor execution flow.
 
 ### Changed
+- Refined the `codey` architecture payload with an explicit intent-resolver system prompt, stricter sandbox internet-policy fields, and concrete implementation notes for containerized tooling + Alembic-backed memory traces.
 - Added `/chat` conversation controls: `history_limit` (bounded 1-50), `reset_conversation`, and `persist` flags, and now return `used_history` in `ChatResponse` for observability.
 - Enforced safer tool contracts by rejecting oversized `/tool` input payloads (>2000 chars) and requiring strict `owner/repo` format for GitHub helper tools.
 - Switched the default `LLM_PROVIDER` from `openai` to `ollama` so local models are used by default unless overridden by environment configuration.
