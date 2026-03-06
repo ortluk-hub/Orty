@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from service.memory import MemoryStore
+from service.supervisor.bot_types.utils import _safe_positive_int
 from service.supervisor.events import BotEventWriter
 
 
@@ -13,14 +14,6 @@ ROADMAP_FALLBACK = [
     "Safer, extensible tool contracts",
     "Automation + integration expansion",
 ]
-
-
-def _safe_positive_int(value: object, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
 
 
 def _extract_focus_areas(roadmap_text: str) -> list[str]:
@@ -105,11 +98,9 @@ async def run_code_review_bot(
 
         memory_messages: list[dict[str, str]] = []
         if conversation_id:
-            _get_messages = getattr(memory_store, "get_recent_messages")
-            try:
-                memory_messages = _get_messages(str(conversation_id), limit=history_limit, client_id=owner_client_id)
-            except TypeError:
-                memory_messages = _get_messages(str(conversation_id), limit=history_limit)
+            memory_messages = memory_store.get_recent_messages(
+                str(conversation_id), limit=history_limit, client_id=owner_client_id
+            )
 
         focus_areas = _extract_focus_areas(roadmap_text)
         proposals = _build_proposals(focus_areas, memory_messages, max_items=max_proposals)

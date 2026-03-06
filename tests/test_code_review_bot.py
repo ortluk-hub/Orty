@@ -5,7 +5,7 @@ from service.supervisor.bot_types import code_review
 
 
 class StubMemoryStore:
-    def get_recent_messages(self, conversation_id: str, limit: int = 10):
+    def get_recent_messages(self, conversation_id: str, limit: int = 10, client_id: str | None = None):
         return []
 
 
@@ -58,7 +58,7 @@ def test_code_review_bot_handles_invalid_numeric_config(monkeypatch):
     monkeypatch.setattr(code_review.asyncio, "to_thread", fake_to_thread)
 
     class CapturingMemoryStore(StubMemoryStore):
-        def get_recent_messages(self, conversation_id: str, limit: int = 10):
+        def get_recent_messages(self, conversation_id: str, limit: int = 10, client_id: str | None = None):
             captured["history_limit"] = limit
             return []
 

@@ -1,5 +1,6 @@
 from fastapi import Header, HTTPException
 
+from service.ai import AIService
 from service.config import settings
 from service.memory import MemoryStore
 from service.storage.bot_events_repo import BotEventsRepository
@@ -18,6 +19,7 @@ event_writer = BotEventWriter(bot_events_repo)
 bot_registry = BotRegistry(bots_repo, event_writer)
 memory_store = MemoryStore(_db.db_path)
 bot_runner = BotRunner(bot_registry, bots_repo, event_writer, memory_store)
+ai_service = AIService()
 
 
 def ensure_primary_client() -> dict:
