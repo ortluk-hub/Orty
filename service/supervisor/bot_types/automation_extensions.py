@@ -1,4 +1,5 @@
 from service.memory import MemoryStore
+from service.supervisor.bot_types.utils import _safe_positive_int
 from service.supervisor.events import BotEventWriter
 
 
@@ -41,14 +42,6 @@ def _build_extension_steps(target: str, memory_text: str) -> list[str]:
     ]
 
 
-def _safe_positive_int(value: object, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
-
-
 async def run_automation_extensions_bot(
     bot_id: str,
     owner_client_id: str,
@@ -62,11 +55,9 @@ async def run_automation_extensions_bot(
     extension_targets = _normalized_targets(config.get("integration_targets"))
     memory_messages: list[dict[str, str]] = []
     if conversation_id:
-        _get_messages = getattr(memory_store, "get_recent_messages")
-        try:
-            memory_messages = _get_messages(str(conversation_id), limit=history_limit, client_id=owner_client_id)
-        except TypeError:
-            memory_messages = _get_messages(str(conversation_id), limit=history_limit)
+        memory_messages = memory_store.get_recent_messages(
+            str(conversation_id), limit=history_limit, client_id=owner_client_id
+        )
     memory_text = "\n".join(message.get("content", "") for message in memory_messages).lower()
 
     event_writer.emit(

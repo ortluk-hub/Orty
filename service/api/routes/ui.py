@@ -1,15 +1,11 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from service.ai import AIService
-from service.api.deps import ensure_primary_client
-from service.memory import MemoryStore
+from service.api.deps import ai_service, ensure_primary_client, memory_store
 from service.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix='/ui', tags=['ui'], redirect_slashes=False)
 root_router = APIRouter(tags=['ui'])
-ai_service = AIService()
-memory_store = MemoryStore()
 
 
 @root_router.get('/', include_in_schema=False)
