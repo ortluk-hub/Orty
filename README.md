@@ -7,8 +7,8 @@ Orty is a modular, on-device AI assistant built with FastAPI and designed for cl
 ## Status
 
 Version: v0.1.0-alpha
-Current Phase: Conversation controls + safer tool contracts
-Next Phase: Automation extensions
+Current Phase: Client-instance auth + memory APIs + escalation handoff
+Next Phase: Alfred integration hardening
 
 ---
 
@@ -18,17 +18,19 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 
 ### What is already in place
 - FastAPI application structure and running server entrypoint
-- Health endpoint and request authentication via registered clients (with shared-secret root fallback)
-- Chat endpoint with OpenAI/Ollama provider routing and pluggable provider registry
+- Health endpoint and request authentication via registered clients (with shared-secret admin fallback)
+- Client auth lifecycle APIs (`/v1/auth/token`, `/v1/auth/rotate`, `/v1/auth/revoke`, `/v1/auth/me`, `/v1/auth/introspect`)
+- Chat endpoint with OpenAI/Ollama provider routing, escalation envelope support, and response handoff metadata
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
 - SQLite-backed conversation memory with recent-history retrieval
-- Client-scoped memory and per-client preferences for registered clients
+- Client-scoped long-term memory APIs (`/v1/memory/records` CRUD + `/v1/memory/summaries` checkpoints)
 - Supervisor-managed bot lifecycle APIs with `heartbeat`, `code_review`, `automation_extensions`, and `codey` bot types
 - Conversation controls in `/chat` (`history_limit`, `reset_conversation`, `persist`)
 - Safer tool contracts with bounded tool input and stricter `owner/repo` validation for GitHub tools
+- Optional Orty cloud fallback path (`ENABLE_CLOUD_FALLBACK`) when local provider fails
 
 ### What comes next
-The next planned milestone is **automation extensions**.
+The next planned milestone is **Alfred wiring and production hardening**.
 
 ### Integration Contract
 - Alfred-Orty integration contract (auth, escalation, and memory roadmap): `docs/alfred-orty-integration-contract-v1.md`
@@ -91,29 +93,33 @@ The system is designed to support:
 
 ```mermaid
 flowchart TD
-    C[Client] -->|POST /chat + x-orty-secret| API[FastAPI app\nservice/api.py]
+    C[Client] -->|POST /chat + Bearer token| API[FastAPI app\nservice/api/__init__.py]
+    A[Admin] -->|x-orty-secret| API
     C -->|GET /health| API
 
-    API --> SEC[verify_secret\nservice/security.py]
+    API --> AUTH[get_request_auth\nservice/api/deps.py]
     API --> AI[AIService\nservice/ai.py]
     API --> MEM[MemoryStore\nservice/memory.py]
+    API --> LTM[Memory records + summaries\nservice/api/routes/v1_memory.py]
 
     MEM -->|read recent history| DB[(SQLite\nsettings.SQLITE_PATH)]
     API -->|append user + assistant messages| MEM
 
-    AI -->|provider=openai| OAI[OpenAI Chat Completions API]
-    AI -->|provider=ollama| OLL[Ollama /api/chat]
+    AI -->|primary provider| PRIMARY[Ollama or OpenAI]
+    AI -->|optional fallback| OAI[OpenAI Chat Completions API]
     AI -->|/tool echo\n/tool utc_time| TOOLS[Built-in tool handlers]
 
     CFG[service/config.py\nSettings] --> API
     CFG --> AI
     CFG --> MEM
+    CFG --> AUTH
 ```
 
 Request flow summary:
-1. `/chat` verifies `x-orty-secret`, then loads recent conversation history from SQLite.
-2. `AIService` either executes a built-in tool command or routes to the configured LLM provider.
-3. User + assistant messages are persisted, and the assistant reply is returned with `conversation_id`.
+1. `/chat` authenticates request (`Bearer` token preferred; admin secret supported).
+2. Orty loads recent conversation history and merges optional Alfred escalation context.
+3. `AIService` executes tool calls or routes to the configured provider with optional cloud fallback.
+4. User + assistant messages are persisted, and the reply returns with handoff metadata.
 
 ---
 
@@ -136,10 +142,12 @@ Designed to run in Termux (Android) or any Linux environment.
 orty/
 ├── service/
 │   ├── api/
-│   ├── llm/
 │   ├── storage/
-│   └── conversation/
-├── main.py
+│   ├── supervisor/
+│   └── ...
+├── docs/
+├── tests/
+├── orty.py
 ├── requirements.txt
 └── .env
 ```
@@ -178,22 +186,25 @@ Create a `.env` file in the project root:
 ORTY_SHARED_SECRET=your_shared_secret_here
 LLM_PROVIDER=ollama
 OPENAI_API_KEY=your_openai_key_here
-# or for local models
-# LLM_PROVIDER=openai
+# optional cloud fallback from local failures
+ENABLE_CLOUD_FALLBACK=false
+CLOUD_FALLBACK_PROVIDER=openai
+# local model settings
 # OLLAMA_BASE_URL=http://localhost:11434
-# OLLAMA_MODEL=llama3.2
+# OLLAMA_MODEL=qwen2.5:3b
 SQLITE_PATH=data/orty.db
 SQLITE_TIMEOUT_SECONDS=5
+ALLOW_LEGACY_CLIENT_HEADERS=true
 ```
 
-This value is required for API authentication.
+`ORTY_SHARED_SECRET` is required for admin endpoints (`/v1/clients`, admin introspection/override flows).
 
 ---
 
 ## Running the Server
 
 ```
-uvicorn main:app --host 0.0.0.0 --port 8080
+uvicorn service.api:app --host 0.0.0.0 --port 8080
 ```
 
 Health check endpoint:
@@ -304,13 +315,35 @@ Supervisor automation notes:
 
 ## Authentication
 
-All protected endpoints require the following header:
+Preferred runtime authentication is bearer token per client instance:
+
+1. Provision client identity (admin):
+```
+POST /v1/clients
+x-orty-secret: <admin-secret>
+```
+
+2. Exchange client credentials:
+```
+POST /v1/auth/token
+{
+  "client_id": "...",
+  "client_token": "..."
+}
+```
+
+3. Use bearer token:
+```
+Authorization: Bearer <access_token>
+```
+
+Compatibility mode:
 
 ```
 x-orty-secret: <your_shared_secret>
 ```
 
-Requests without this header or with an invalid value will be rejected.
+`x-orty-secret` is still valid for admin operations and root testing flows.
 
 ---
 

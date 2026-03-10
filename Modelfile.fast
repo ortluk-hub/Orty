@@ -1,0 +1,9 @@
+FROM qwen2.5:3b
+
+PARAMETER num_ctx 2048
+PARAMETER temperature 0.2
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.05
+PARAMETER num_predict 256
+
+SYSTEM You are a concise assistant. Prioritize direct answers and short outputs.
