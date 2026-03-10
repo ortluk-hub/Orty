@@ -6,6 +6,7 @@ import base64
 import inspect
 from pathlib import Path
 import re
+from typing import TypedDict
 
 import httpx
 
@@ -17,6 +18,14 @@ ToolFn = Callable[[str], ToolResult]
 ToolFn = Callable[[str], str]
 TOOL_INPUT_MAX_LENGTH = 2000
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+class GenerationResult(TypedDict):
+    reply: str
+    provider: str
+    handled_by: str
+    fallback_used: bool
+    fallback_provider: str | None
 
 
 class AIService:
@@ -44,19 +53,100 @@ class AIService:
         self._tools[name.lower()] = tool
 
     async def generate(self, message: str, history: list[dict[str, str]] | None = None) -> str:
+        result = await self.generate_with_meta(message, history=history)
+        return result["reply"]
+
+    async def generate_with_meta(self, message: str, history: list[dict[str, str]] | None = None) -> GenerationResult:
         provider = settings.LLM_PROVIDER.lower()
         history = history or []
 
         tool_result = await self._maybe_execute_tool(message)
         if tool_result is not None:
-            return tool_result
+            return {
+                "reply": tool_result,
+                "provider": "tool",
+                "handled_by": "tool",
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
 
         generator = self._providers.get(provider)
         if generator is None:
             available = ", ".join(sorted(self._providers.keys()))
-            return f"Unsupported LLM_PROVIDER '{provider}'. Available providers: {available}."
+            return {
+                "reply": f"Unsupported LLM_PROVIDER '{provider}'. Available providers: {available}.",
+                "provider": provider,
+                "handled_by": "unsupported-provider",
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
 
-        return await generator(message, history)
+        primary_reply = await generator(message, history)
+        if not self._should_attempt_cloud_fallback(provider, primary_reply):
+            return {
+                "reply": primary_reply,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
+
+        fallback_provider = settings.CLOUD_FALLBACK_PROVIDER.lower()
+        fallback_generator = self._providers.get(fallback_provider)
+        if fallback_generator is None:
+            return {
+                "reply": primary_reply,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
+
+        fallback_reply = await fallback_generator(message, history)
+        if self._is_provider_error(fallback_provider, fallback_reply):
+            return {
+                "reply": (
+                    f"{primary_reply}\n\n"
+                    f"Cloud fallback ({fallback_provider}) also failed: {fallback_reply}"
+                ),
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": fallback_provider,
+            }
+        return {
+            "reply": fallback_reply,
+            "provider": fallback_provider,
+            "handled_by": self._handled_by_for_provider(fallback_provider, fallback_used=True),
+            "fallback_used": True,
+            "fallback_provider": fallback_provider,
+        }
+
+    def _is_provider_error(self, provider: str, reply: str) -> bool:
+        normalized = provider.lower()
+        if normalized == "ollama":
+            return reply.startswith("Ollama is not reachable.") or reply.startswith("Ollama error:")
+        if normalized == "openai":
+            return reply == "OPENAI_API_KEY not configured." or reply.startswith("OpenAI error:")
+        return False
+
+    def _should_attempt_cloud_fallback(self, provider: str, primary_reply: str) -> bool:
+        if not settings.ENABLE_CLOUD_FALLBACK:
+            return False
+        fallback_provider = settings.CLOUD_FALLBACK_PROVIDER.lower()
+        if not fallback_provider or fallback_provider == provider.lower():
+            return False
+        return self._is_provider_error(provider, primary_reply)
+
+    def _handled_by_for_provider(self, provider: str, *, fallback_used: bool) -> str:
+        normalized = provider.lower()
+        if fallback_used:
+            return "cloud-fallback"
+        if normalized == "ollama":
+            return "orty-local"
+        if normalized == "openai":
+            return "cloud-primary"
+        return normalized
 
     async def _generate_openai(self, message: str, history: list[dict[str, str]]) -> str:
         if not settings.OPENAI_API_KEY:

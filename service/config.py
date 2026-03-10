@@ -22,6 +22,10 @@ class Settings:
 
         self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
         self.OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:4b")
+        self.ENABLE_CLOUD_FALLBACK: bool = os.getenv(
+            "ENABLE_CLOUD_FALLBACK", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        self.CLOUD_FALLBACK_PROVIDER: str = os.getenv("CLOUD_FALLBACK_PROVIDER", "openai").lower()
 
         self.SQLITE_PATH: str = os.getenv("SQLITE_PATH", "data/orty.db")
         self.SQLITE_TIMEOUT_SECONDS: float = float(os.getenv("SQLITE_TIMEOUT_SECONDS", "5"))
@@ -30,6 +34,10 @@ class Settings:
 
         self.BOT_HEARTBEAT_DEFAULT_SECONDS: int = int(os.getenv("BOT_HEARTBEAT_DEFAULT_SECONDS", "10"))
         self.BOT_RUNNER_MAX_BOTS: int = int(os.getenv("BOT_RUNNER_MAX_BOTS", "25"))
+        self.CLIENT_ACCESS_TOKEN_TTL_SECONDS: int = int(os.getenv("CLIENT_ACCESS_TOKEN_TTL_SECONDS", "3600"))
+        self.ALLOW_LEGACY_CLIENT_HEADERS: bool = os.getenv(
+            "ALLOW_LEGACY_CLIENT_HEADERS", "true"
+        ).strip().lower() in {"1", "true", "yes", "on"}
 
 
 settings = Settings()

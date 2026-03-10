@@ -24,3 +24,16 @@ def test_runtime_env_takes_precedence_over_dotenv(monkeypatch, tmp_path):
     reload(config)
 
     assert config.settings.LLM_PROVIDER == "openai"
+
+
+def test_cloud_fallback_defaults_to_disabled(monkeypatch):
+    monkeypatch.delenv("ENABLE_CLOUD_FALLBACK", raising=False)
+    monkeypatch.delenv("CLOUD_FALLBACK_PROVIDER", raising=False)
+    monkeypatch.delenv("ORTY_ENV_FILE", raising=False)
+
+    import service.config as config
+
+    reload(config)
+
+    assert config.settings.ENABLE_CLOUD_FALLBACK is False
+    assert config.settings.CLOUD_FALLBACK_PROVIDER == "openai"

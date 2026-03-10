@@ -78,6 +78,67 @@ class SQLiteDB:
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_is_primary ON clients(is_primary) WHERE is_primary = 1")
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS client_access_tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    revoked_at TEXT,
+                    last_used_at TEXT,
+                    FOREIGN KEY(client_id) REFERENCES clients(client_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_access_tokens_client_id ON client_access_tokens (client_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_access_tokens_expires_at ON client_access_tokens (expires_at)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_records (
+                    record_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    memory_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    summary TEXT,
+                    tags_json TEXT NOT NULL DEFAULT '[]',
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    source TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    deleted_at TEXT,
+                    FOREIGN KEY(client_id) REFERENCES clients(client_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_records_client_created ON memory_records (client_id, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_records_client_type_created ON memory_records (client_id, memory_type, created_at)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_summaries (
+                    summary_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    conversation_id TEXT NOT NULL,
+                    context_version TEXT,
+                    summary TEXT NOT NULL,
+                    source TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(client_id) REFERENCES clients(client_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_summaries_client_conversation_created ON memory_summaries (client_id, conversation_id, created_at)"
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bots (
                     bot_id TEXT PRIMARY KEY,
                     owner_client_id TEXT NOT NULL,
