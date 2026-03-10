@@ -30,6 +30,9 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 ### What comes next
 The next planned milestone is **automation extensions**.
 
+### Integration Contract
+- Alfred-Orty integration contract (auth, escalation, and memory roadmap): `docs/alfred-orty-integration-contract-v1.md`
+
 ### User Interface Status
 - Orty now includes a **simple built-in web UI** for quick manual testing.
 - Open `GET /ui` in a browser to chat as the primary root client without manually setting secrets, and continue conversations via `conversation_id`.

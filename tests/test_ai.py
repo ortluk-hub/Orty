@@ -202,6 +202,67 @@ def test_generate_returns_recoverable_message_when_ollama_is_unreachable(monkeyp
     assert settings.OLLAMA_BASE_URL in result
 
 
+def test_generate_can_fallback_to_openai_when_ollama_fails(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", True)
+    monkeypatch.setattr(settings, "CLOUD_FALLBACK_PROVIDER", "openai")
+
+    async def fake_ollama(message, history):
+        return "Ollama is not reachable. Expected server at http://127.0.0.1:11434."
+
+    async def fake_openai(message, history):
+        return "cloud-reply"
+
+    service.register_provider("ollama", fake_ollama)
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate("hello"))
+
+    assert result == "cloud-reply"
+
+
+def test_generate_returns_primary_error_when_cloud_fallback_disabled(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "CLOUD_FALLBACK_PROVIDER", "openai")
+
+    async def fake_ollama(message, history):
+        return "Ollama error: model missing"
+
+    async def fake_openai(message, history):
+        return "cloud-reply"
+
+    service.register_provider("ollama", fake_ollama)
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate("hello"))
+
+    assert result == "Ollama error: model missing"
+
+
+def test_generate_reports_when_primary_and_fallback_both_fail(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", True)
+    monkeypatch.setattr(settings, "CLOUD_FALLBACK_PROVIDER", "openai")
+
+    async def fake_ollama(message, history):
+        return "Ollama error: overloaded"
+
+    async def fake_openai(message, history):
+        return "OpenAI error: rate limit"
+
+    service.register_provider("ollama", fake_ollama)
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate("hello"))
+
+    assert "Ollama error: overloaded" in result
+    assert "Cloud fallback (openai) also failed: OpenAI error: rate limit" in result
+
+
 def test_generate_executes_gh_repo_tool(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")

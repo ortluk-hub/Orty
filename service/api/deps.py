@@ -6,6 +6,8 @@ from service.storage.bot_events_repo import BotEventsRepository
 from service.storage.bots_repo import BotsRepository
 from service.storage.clients_repo import ClientsRepository
 from service.storage.db import SQLiteDB
+from service.storage.memory_records_repo import MemoryRecordsRepository
+from service.storage.memory_summaries_repo import MemorySummariesRepository
 from service.supervisor.bot_registry import BotRegistry
 from service.supervisor.bot_runner import BotRunner
 from service.supervisor.events import BotEventWriter
@@ -13,6 +15,8 @@ from service.supervisor.events import BotEventWriter
 _db = SQLiteDB()
 clients_repo = ClientsRepository(_db)
 bots_repo = BotsRepository(_db)
+memory_records_repo = MemoryRecordsRepository(_db)
+memory_summaries_repo = MemorySummariesRepository(_db)
 bot_events_repo = BotEventsRepository(_db)
 event_writer = BotEventWriter(bot_events_repo)
 bot_registry = BotRegistry(bots_repo, event_writer)
@@ -43,16 +47,40 @@ def require_client_auth(
 
 def get_request_auth(
     x_orty_secret: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
     x_orty_client_id: str | None = Header(default=None),
     x_orty_client_token: str | None = Header(default=None),
 ) -> dict:
     if x_orty_secret and x_orty_secret == settings.ORTY_SHARED_SECRET:
         primary = ensure_primary_client()
-        return {"is_admin": True, "client_id": primary["client_id"], "client": primary}
-    if x_orty_client_id and x_orty_client_token:
+        return {
+            "is_admin": True,
+            "auth_method": "admin-secret",
+            "client_id": primary["client_id"],
+            "client": primary,
+        }
+    if authorization:
+        prefix = "bearer "
+        if authorization.lower().startswith(prefix):
+            access_token = authorization[len(prefix):].strip()
+            client = clients_repo.verify_access_token(access_token)
+            if client:
+                return {
+                    "is_admin": False,
+                    "auth_method": "bearer",
+                    "client_id": client["client_id"],
+                    "client": client,
+                }
+
+    if settings.ALLOW_LEGACY_CLIENT_HEADERS and x_orty_client_id and x_orty_client_token:
         if clients_repo.verify_client_token(x_orty_client_id, x_orty_client_token):
             client = clients_repo.get_client(x_orty_client_id)
-            return {"is_admin": False, "client_id": x_orty_client_id, "client": client}
+            return {
+                "is_admin": False,
+                "auth_method": "legacy-client-headers",
+                "client_id": x_orty_client_id,
+                "client": client,
+            }
     raise HTTPException(status_code=401, detail="Unauthorized")
 
 

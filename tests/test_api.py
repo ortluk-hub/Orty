@@ -171,3 +171,47 @@ def test_ui_chat_uses_primary_client_auth_without_secret(monkeypatch):
     response = client.post("/ui/chat", json={"message": "hello root"})
     assert response.status_code == 200
     assert response.json()["conversation_id"]
+
+
+def test_chat_returns_generation_metadata(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    response = client.post(
+        "/chat",
+        json={"message": "hello"},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "openai"
+    assert body["fallback_used"] is False
+    assert body["handled_by"] == "cloud-primary"
+
+
+def test_chat_accepts_escalation_context_and_echoes_context_metadata(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+
+    response = client.post(
+        "/chat",
+        json={
+            "message": "handle this",
+            "escalation_context": {
+                "context_version": "v1",
+                "summary_id": "sum-123",
+                "local_summary": "Alfred local context summary.",
+                "recent_messages": [
+                    {"role": "user", "content": "previous user turn"},
+                    {"role": "assistant", "content": "previous assistant turn"},
+                ],
+            },
+        },
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["context_version"] == "v1"
+    assert body["summary_id"] == "sum-123"

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from service.ai import AIService
 from service.api.deps import get_request_auth
 from service.memory import MemoryStore
-from service.models.schemas import ChatRequest, ChatResponse
+from service.models.schemas import ChatRequest, ChatResponse, EscalationContext
 
 router = APIRouter()
 ai_service = AIService()
@@ -17,7 +17,9 @@ async def chat(request: ChatRequest, auth: dict = Depends(get_request_auth)):
     client_id = auth.get("client_id")
 
     history = memory_store.get_recent_messages(conversation_id, limit=request.history_limit, client_id=client_id)
-    reply = await ai_service.generate(request.message, history=history)
+    effective_history = [*history, *_escalation_context_messages(request.escalation_context)]
+    generated = await ai_service.generate_with_meta(request.message, history=effective_history)
+    reply = generated["reply"]
 
     if request.persist:
         memory_store.append_message(conversation_id, 'user', request.message, client_id=client_id)
@@ -27,4 +29,29 @@ async def chat(request: ChatRequest, auth: dict = Depends(get_request_auth)):
         reply=reply,
         conversation_id=conversation_id,
         used_history=len(history),
+        handled_by=generated.get("handled_by"),
+        provider=generated.get("provider"),
+        fallback_used=bool(generated.get("fallback_used", False)),
+        context_version=request.escalation_context.context_version if request.escalation_context else None,
+        summary_id=request.escalation_context.summary_id if request.escalation_context else None,
     )
+
+
+def _escalation_context_messages(context: EscalationContext | None) -> list[dict[str, str]]:
+    if context is None:
+        return []
+
+    messages: list[dict[str, str]] = []
+    if context.local_summary:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Escalation context from Alfred (local summary):\n"
+                    f"{context.local_summary}"
+                ),
+            }
+        )
+    for msg in context.recent_messages:
+        messages.append({"role": msg.role, "content": msg.content})
+    return messages
