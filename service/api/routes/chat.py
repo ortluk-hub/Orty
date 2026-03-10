@@ -1,13 +1,9 @@
 from fastapi import APIRouter, Depends
 
-from service.ai import AIService
-from service.api.deps import get_request_auth
-from service.memory import MemoryStore
+from service.api.deps import ai_service, get_request_auth, memory_store
 from service.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter()
-ai_service = AIService()
-memory_store = MemoryStore()
 
 
 @router.post('/chat', response_model=ChatResponse)

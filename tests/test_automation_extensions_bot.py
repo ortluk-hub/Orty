@@ -4,7 +4,7 @@ from service.supervisor.bot_types import automation_extensions
 
 
 class StubMemoryStore:
-    def get_recent_messages(self, conversation_id: str, limit: int = 10):
+    def get_recent_messages(self, conversation_id: str, limit: int = 10, client_id: str | None = None):
         return [
             {"role": "user", "content": "Need github automation and slack notifications."},
             {"role": "assistant", "content": "Let's prioritize github first."},
@@ -62,7 +62,7 @@ def test_run_automation_extensions_bot_handles_invalid_history_limit():
         def __init__(self):
             self.captured_limit = None
 
-        def get_recent_messages(self, conversation_id: str, limit: int = 10):
+        def get_recent_messages(self, conversation_id: str, limit: int = 10, client_id: str | None = None):
             self.captured_limit = limit
             return super().get_recent_messages(conversation_id, limit=limit)
 

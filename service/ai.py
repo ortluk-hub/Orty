@@ -14,7 +14,6 @@ from service.config import settings
 GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
 ToolResult = str | Awaitable[str]
 ToolFn = Callable[[str], ToolResult]
-ToolFn = Callable[[str], str]
 TOOL_INPUT_MAX_LENGTH = 2000
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
