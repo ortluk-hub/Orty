@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 from service.config import settings
@@ -16,12 +17,24 @@ class SQLiteDB:
         self.timeout_seconds = settings.SQLITE_TIMEOUT_SECONDS
         self.initialize()
 
-    def connect(self) -> sqlite3.Connection:
+    def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=self.timeout_seconds)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
+
+    @contextmanager
+    def connect(self):
+        conn = self._open_connection()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def initialize(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -106,6 +119,11 @@ class SQLiteDB:
                     tags_json TEXT NOT NULL DEFAULT '[]',
                     importance REAL NOT NULL DEFAULT 0.5,
                     source TEXT,
+                    external_key TEXT,
+                    is_pinned INTEGER NOT NULL DEFAULT 0,
+                    expires_at INTEGER,
+                    source_created_at INTEGER,
+                    source_updated_at INTEGER,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     deleted_at TEXT,
@@ -113,11 +131,59 @@ class SQLiteDB:
                 )
                 """
             )
+            memory_record_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+            }
+            if "external_key" not in memory_record_columns:
+                conn.execute("ALTER TABLE memory_records ADD COLUMN external_key TEXT")
+            if "is_pinned" not in memory_record_columns:
+                conn.execute("ALTER TABLE memory_records ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+            if "expires_at" not in memory_record_columns:
+                conn.execute("ALTER TABLE memory_records ADD COLUMN expires_at INTEGER")
+            if "source_created_at" not in memory_record_columns:
+                conn.execute("ALTER TABLE memory_records ADD COLUMN source_created_at INTEGER")
+            if "source_updated_at" not in memory_record_columns:
+                conn.execute("ALTER TABLE memory_records ADD COLUMN source_updated_at INTEGER")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memory_records_client_created ON memory_records (client_id, created_at)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memory_records_client_type_created ON memory_records (client_id, memory_type, created_at)"
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_memory_records_client_external_key
+                ON memory_records (client_id, external_key)
+                """
+            )
+            now = utc_now_iso()
+            conn.execute(
+                """
+                UPDATE memory_records
+                SET deleted_at = COALESCE(deleted_at, ?), updated_at = ?
+                WHERE rowid IN (
+                    SELECT older.rowid
+                    FROM memory_records AS older
+                    JOIN memory_records AS newer
+                      ON older.client_id = newer.client_id
+                     AND older.external_key = newer.external_key
+                     AND older.external_key IS NOT NULL
+                     AND older.deleted_at IS NULL
+                     AND newer.deleted_at IS NULL
+                     AND (
+                         older.updated_at < newer.updated_at
+                         OR (older.updated_at = newer.updated_at AND older.rowid < newer.rowid)
+                     )
+                )
+                """,
+                (now, now),
+            )
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_records_active_external_key
+                ON memory_records (client_id, external_key)
+                WHERE deleted_at IS NULL AND external_key IS NOT NULL
+                """
             )
             conn.execute(
                 """

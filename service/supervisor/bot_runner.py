@@ -22,6 +22,7 @@ class BotRunner:
         bot = self.registry.get_bot(bot_id)
         if bot_id in self.tasks and not self.tasks[bot_id].done():
             raise HTTPException(status_code=409, detail="Bot is already running")
+        self._prune_finished_tasks()
         if len([task for task in self.tasks.values() if not task.done()]) >= settings.BOT_RUNNER_MAX_BOTS:
             raise HTTPException(status_code=409, detail="Bot runner capacity reached")
 
@@ -124,3 +125,16 @@ class BotRunner:
         if bot["status"] != status:
             self.registry.transition(bot_id, status, event)
         return self.registry.get_bot(bot_id)
+
+    async def shutdown(self) -> None:
+        tasks = [(bot_id, task) for bot_id, task in self.tasks.items() if not task.done()]
+        for _, task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
+        self._prune_finished_tasks()
+
+    def _prune_finished_tasks(self) -> None:
+        finished = [bot_id for bot_id, task in self.tasks.items() if task.done()]
+        for bot_id in finished:
+            self.tasks.pop(bot_id, None)

@@ -1,29 +1,30 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from service.ai import AIService
-from service.api.deps import get_request_auth
-from service.memory import MemoryStore
+from service.api.deps import get_request_auth, get_runtime
 from service.models.schemas import ChatRequest, ChatResponse, EscalationContext
 
 router = APIRouter()
-ai_service = AIService()
-memory_store = MemoryStore()
 
 
 @router.post('/chat', response_model=ChatResponse)
-async def chat(request: ChatRequest, auth: dict = Depends(get_request_auth)):
-    incoming_conversation_id = None if request.reset_conversation else request.conversation_id
-    conversation_id = memory_store.ensure_conversation_id(incoming_conversation_id)
+async def chat(payload: ChatRequest, request: Request, auth: dict = Depends(get_request_auth)):
+    runtime = get_runtime(request)
+    incoming_conversation_id = None if payload.reset_conversation else payload.conversation_id
+    conversation_id = runtime.memory_store.ensure_conversation_id(incoming_conversation_id)
     client_id = auth.get("client_id")
 
-    history = memory_store.get_recent_messages(conversation_id, limit=request.history_limit, client_id=client_id)
-    effective_history = [*history, *_escalation_context_messages(request.escalation_context)]
-    generated = await ai_service.generate_with_meta(request.message, history=effective_history)
+    history = runtime.memory_store.get_recent_messages(
+        conversation_id,
+        limit=payload.history_limit,
+        client_id=client_id,
+    )
+    effective_history = [*history, *_escalation_context_messages(payload.escalation_context)]
+    generated = await runtime.ai_service.generate_with_meta(payload.message, history=effective_history)
     reply = generated["reply"]
 
-    if request.persist:
-        memory_store.append_message(conversation_id, 'user', request.message, client_id=client_id)
-        memory_store.append_message(conversation_id, 'assistant', reply, client_id=client_id)
+    if payload.persist:
+        runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=client_id)
+        runtime.memory_store.append_message(conversation_id, 'assistant', reply, client_id=client_id)
 
     return ChatResponse(
         reply=reply,
@@ -32,8 +33,8 @@ async def chat(request: ChatRequest, auth: dict = Depends(get_request_auth)):
         handled_by=generated.get("handled_by"),
         provider=generated.get("provider"),
         fallback_used=bool(generated.get("fallback_used", False)),
-        context_version=request.escalation_context.context_version if request.escalation_context else None,
-        summary_id=request.escalation_context.summary_id if request.escalation_context else None,
+        context_version=payload.escalation_context.context_version if payload.escalation_context else None,
+        summary_id=payload.escalation_context.summary_id if payload.escalation_context else None,
     )
 
 

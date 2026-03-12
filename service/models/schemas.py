@@ -129,6 +129,9 @@ class MemoryRecordCreateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     source: str | None = Field(default=None, max_length=200)
+    external_key: str | None = Field(default=None, min_length=1, max_length=255)
+    is_pinned: bool = False
+    expires_at: int | None = None
 
 
 class MemoryRecordResponse(BaseModel):
@@ -140,6 +143,9 @@ class MemoryRecordResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     importance: float
     source: str | None = None
+    external_key: str | None = None
+    is_pinned: bool = False
+    expires_at: int | None = None
     created_at: str
     updated_at: str
     deleted_at: str | None = None
@@ -152,6 +158,32 @@ class MemoryRecordUpdateRequest(BaseModel):
     tags: list[str] | None = Field(default=None)
     importance: float | None = Field(default=None, ge=0.0, le=1.0)
     source: str | None = Field(default=None, max_length=200)
+    external_key: str | None = Field(default=None, min_length=1, max_length=255)
+    is_pinned: bool | None = None
+    expires_at: int | None = None
+
+
+class MemorySyncItem(BaseModel):
+    key: str = Field(min_length=1, max_length=255)
+    category: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+    sourceText: str = Field(min_length=1, max_length=20000)
+    createdAt: int
+    updatedAt: int
+    isPinned: bool = False
+    expiresAt: int | None = None
+
+
+class MemorySyncRequest(BaseModel):
+    client: str | None = Field(default=None, min_length=1, max_length=100)
+    client_id: str | None = Field(default=None, min_length=1, max_length=255)
+    memories: list[MemorySyncItem] = Field(default_factory=list)
+
+
+class MemorySyncResponse(BaseModel):
+    status: str
+    syncedCount: int
+    memories: list[MemorySyncItem] = Field(default_factory=list)
 
 
 class MemorySummaryCreateRequest(BaseModel):

@@ -1,13 +1,24 @@
-from fastapi.testclient import TestClient
+import asyncio
+
+import httpx
 
 from service.api import app
 from service.config import settings
 
-client = TestClient(app)
+
+async def _request(method: str, path: str, **kwargs) -> httpx.Response:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.request(method, path, **kwargs)
+
+
+def request(method: str, path: str, **kwargs) -> httpx.Response:
+    return asyncio.run(_request(method, path, **kwargs))
 
 
 def create_client(name: str) -> dict:
-    response = client.post(
+    response = request(
+        'POST',
         '/v1/clients',
         json={'name': name},
         headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
@@ -17,7 +28,8 @@ def create_client(name: str) -> dict:
 
 
 def issue_access_token(client_data: dict) -> dict:
-    response = client.post(
+    response = request(
+        'POST',
         '/v1/auth/token',
         json={
             'client_id': client_data['client_id'],
@@ -31,7 +43,8 @@ def issue_access_token(client_data: dict) -> dict:
 def test_issue_access_token_with_valid_client_credentials():
     created = create_client('Token Client')
 
-    response = client.post(
+    response = request(
+        'POST',
         '/v1/auth/token',
         json={
             'client_id': created['client_id'],
@@ -50,7 +63,8 @@ def test_issue_access_token_with_valid_client_credentials():
 def test_issue_access_token_rejects_invalid_client_token():
     created = create_client('Bad Token Client')
 
-    response = client.post(
+    response = request(
+        'POST',
         '/v1/auth/token',
         json={
             'client_id': created['client_id'],
@@ -68,7 +82,8 @@ def test_chat_accepts_bearer_token(monkeypatch):
     created = create_client('Bearer Chat Client')
     token = issue_access_token(created)
 
-    response = client.post(
+    response = request(
+        'POST',
         '/chat',
         json={'message': 'hello'},
         headers={'Authorization': f"Bearer {token['access_token']}"},
@@ -85,7 +100,8 @@ def test_legacy_client_headers_can_be_disabled(monkeypatch):
 
     created = create_client('Legacy Off Client')
 
-    legacy = client.post(
+    legacy = request(
+        'POST',
         '/chat',
         json={'message': 'legacy'},
         headers={
@@ -96,7 +112,8 @@ def test_legacy_client_headers_can_be_disabled(monkeypatch):
     assert legacy.status_code == 401
 
     token = issue_access_token(created)
-    bearer = client.post(
+    bearer = request(
+        'POST',
         '/chat',
         json={'message': 'bearer'},
         headers={'Authorization': f"Bearer {token['access_token']}"},
@@ -112,14 +129,14 @@ def test_revoke_access_token_blocks_future_requests(monkeypatch):
     token = issue_access_token(created)
     bearer_headers = {'Authorization': f"Bearer {token['access_token']}"}
 
-    before_revoke = client.post('/chat', json={'message': 'before revoke'}, headers=bearer_headers)
+    before_revoke = request('POST', '/chat', json={'message': 'before revoke'}, headers=bearer_headers)
     assert before_revoke.status_code == 200
 
-    revoke = client.post('/v1/auth/revoke', json={}, headers=bearer_headers)
+    revoke = request('POST', '/v1/auth/revoke', json={}, headers=bearer_headers)
     assert revoke.status_code == 200
     assert revoke.json() == {'revoked': True}
 
-    after_revoke = client.post('/chat', json={'message': 'after revoke'}, headers=bearer_headers)
+    after_revoke = request('POST', '/chat', json={'message': 'after revoke'}, headers=bearer_headers)
     assert after_revoke.status_code == 401
 
 
@@ -127,7 +144,8 @@ def test_rotate_client_token_invalidates_old_client_token_and_access_tokens():
     created = create_client('Rotate Client')
     token = issue_access_token(created)
 
-    rotate = client.post(
+    rotate = request(
+        'POST',
         '/v1/auth/rotate',
         json={
             'client_id': created['client_id'],
@@ -141,7 +159,8 @@ def test_rotate_client_token_invalidates_old_client_token_and_access_tokens():
     assert rotated['client_token']
     assert rotated['client_token'] != created['client_token']
 
-    old_issue = client.post(
+    old_issue = request(
+        'POST',
         '/v1/auth/token',
         json={
             'client_id': created['client_id'],
@@ -150,7 +169,8 @@ def test_rotate_client_token_invalidates_old_client_token_and_access_tokens():
     )
     assert old_issue.status_code == 401
 
-    new_issue = client.post(
+    new_issue = request(
+        'POST',
         '/v1/auth/token',
         json={
             'client_id': created['client_id'],
@@ -159,7 +179,8 @@ def test_rotate_client_token_invalidates_old_client_token_and_access_tokens():
     )
     assert new_issue.status_code == 200
 
-    old_bearer = client.post(
+    old_bearer = request(
+        'POST',
         '/chat',
         json={'message': 'old token should fail'},
         headers={'Authorization': f"Bearer {token['access_token']}"},
@@ -171,7 +192,8 @@ def test_auth_me_returns_authenticated_client_context():
     created = create_client('Me Endpoint Client')
     token = issue_access_token(created)
 
-    response = client.get(
+    response = request(
+        'GET',
         '/v1/auth/me',
         headers={'Authorization': f"Bearer {token['access_token']}"},
     )
@@ -186,14 +208,16 @@ def test_auth_introspect_is_admin_only():
     created = create_client('Introspect Owner')
     token = issue_access_token(created)
 
-    forbidden = client.post(
+    forbidden = request(
+        'POST',
         '/v1/auth/introspect',
         json={'access_token': token['access_token']},
         headers={'Authorization': f"Bearer {token['access_token']}"},
     )
     assert forbidden.status_code == 403
 
-    allowed = client.post(
+    allowed = request(
+        'POST',
         '/v1/auth/introspect',
         json={'access_token': token['access_token']},
         headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
