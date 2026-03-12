@@ -1,13 +1,24 @@
-from fastapi.testclient import TestClient
+import asyncio
+
+import httpx
 
 from service.api import app
 from service.config import settings
 
-client = TestClient(app)
+
+async def _request(method: str, path: str, **kwargs) -> httpx.Response:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.request(method, path, **kwargs)
+
+
+def request(method: str, path: str, **kwargs) -> httpx.Response:
+    return asyncio.run(_request(method, path, **kwargs))
 
 
 def create_client(name: str) -> dict:
-    response = client.post(
+    response = request(
+        'POST',
         '/v1/clients',
         json={'name': name},
         headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
@@ -17,7 +28,8 @@ def create_client(name: str) -> dict:
 
 
 def issue_access_token(client_data: dict) -> str:
-    response = client.post(
+    response = request(
+        'POST',
         '/v1/auth/token',
         json={
             'client_id': client_data['client_id'],
@@ -36,7 +48,8 @@ def test_memory_record_create_and_list_for_authenticated_client():
     created = create_client('Memory Client')
     token = issue_access_token(created)
 
-    create_response = client.post(
+    create_response = request(
+        'POST',
         '/v1/memory/records',
         json={
             'memory_type': 'fact',
@@ -53,7 +66,7 @@ def test_memory_record_create_and_list_for_authenticated_client():
     assert created_record['client_id'] == created['client_id']
     assert created_record['memory_type'] == 'fact'
 
-    list_response = client.get('/v1/memory/records', headers=bearer_headers(token))
+    list_response = request('GET', '/v1/memory/records', headers=bearer_headers(token))
     assert list_response.status_code == 200
     records = list_response.json()
     assert any(record['record_id'] == created_record['record_id'] for record in records)
@@ -64,7 +77,8 @@ def test_memory_record_list_filters():
     token = issue_access_token(created)
     headers = bearer_headers(token)
 
-    client.post(
+    request(
+        'POST',
         '/v1/memory/records',
         json={
             'memory_type': 'task',
@@ -75,7 +89,8 @@ def test_memory_record_list_filters():
         },
         headers=headers,
     )
-    client.post(
+    request(
+        'POST',
         '/v1/memory/records',
         json={
             'memory_type': 'fact',
@@ -87,7 +102,7 @@ def test_memory_record_list_filters():
         headers=headers,
     )
 
-    filtered = client.get('/v1/memory/records?memory_type=fact&tag=profile&source=import', headers=headers)
+    filtered = request('GET', '/v1/memory/records?memory_type=fact&tag=profile&source=import', headers=headers)
     assert filtered.status_code == 200
     rows = filtered.json()
     assert len(rows) >= 1
@@ -102,7 +117,8 @@ def test_memory_record_cross_client_access_is_forbidden():
     token_a = issue_access_token(client_a)
     token_b = issue_access_token(client_b)
 
-    create_response = client.post(
+    create_response = request(
+        'POST',
         '/v1/memory/records',
         json={
             'memory_type': 'fact',
@@ -112,7 +128,8 @@ def test_memory_record_cross_client_access_is_forbidden():
     )
     assert create_response.status_code == 200
 
-    forbidden = client.get(
+    forbidden = request(
+        'GET',
         f"/v1/memory/records?client_id={client_a['client_id']}",
         headers=bearer_headers(token_b),
     )
@@ -122,7 +139,8 @@ def test_memory_record_cross_client_access_is_forbidden():
 def test_admin_can_write_and_read_memory_for_any_client():
     target = create_client('Admin Target Client')
 
-    created = client.post(
+    created = request(
+        'POST',
         '/v1/memory/records',
         json={
             'client_id': target['client_id'],
@@ -135,7 +153,8 @@ def test_admin_can_write_and_read_memory_for_any_client():
     assert created.status_code == 200
     assert created.json()['client_id'] == target['client_id']
 
-    listed = client.get(
+    listed = request(
+        'GET',
         f"/v1/memory/records?client_id={target['client_id']}",
         headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
     )
@@ -148,7 +167,8 @@ def test_memory_record_get_patch_delete_lifecycle():
     token = issue_access_token(created)
     headers = bearer_headers(token)
 
-    created_record = client.post(
+    created_record = request(
+        'POST',
         '/v1/memory/records',
         json={
             'memory_type': 'fact',
@@ -162,11 +182,12 @@ def test_memory_record_get_patch_delete_lifecycle():
     ).json()
     record_id = created_record['record_id']
 
-    fetched = client.get(f'/v1/memory/records/{record_id}', headers=headers)
+    fetched = request('GET', f'/v1/memory/records/{record_id}', headers=headers)
     assert fetched.status_code == 200
     assert fetched.json()['content'] == 'Original content'
 
-    patched = client.patch(
+    patched = request(
+        'PATCH',
         f'/v1/memory/records/{record_id}',
         json={
             'content': 'Updated content',
@@ -183,11 +204,11 @@ def test_memory_record_get_patch_delete_lifecycle():
     assert patched_body['tags'] == ['one', 'two']
     assert patched_body['importance'] == 0.95
 
-    deleted = client.delete(f'/v1/memory/records/{record_id}', headers=headers)
+    deleted = request('DELETE', f'/v1/memory/records/{record_id}', headers=headers)
     assert deleted.status_code == 200
     assert deleted.json() == {'deleted': True}
 
-    missing_after_delete = client.get(f'/v1/memory/records/{record_id}', headers=headers)
+    missing_after_delete = request('GET', f'/v1/memory/records/{record_id}', headers=headers)
     assert missing_after_delete.status_code == 404
 
 
@@ -197,7 +218,8 @@ def test_memory_record_record_level_authorization():
     token_a = issue_access_token(client_a)
     token_b = issue_access_token(client_b)
 
-    created = client.post(
+    created = request(
+        'POST',
         '/v1/memory/records',
         json={'memory_type': 'fact', 'content': 'A-only record'},
         headers=bearer_headers(token_a),
@@ -205,23 +227,25 @@ def test_memory_record_record_level_authorization():
     assert created.status_code == 200
     record_id = created.json()['record_id']
 
-    forbidden_get = client.get(f'/v1/memory/records/{record_id}', headers=bearer_headers(token_b))
+    forbidden_get = request('GET', f'/v1/memory/records/{record_id}', headers=bearer_headers(token_b))
     assert forbidden_get.status_code == 403
 
-    forbidden_patch = client.patch(
+    forbidden_patch = request(
+        'PATCH',
         f'/v1/memory/records/{record_id}',
         json={'content': 'B should not update'},
         headers=bearer_headers(token_b),
     )
     assert forbidden_patch.status_code == 403
 
-    forbidden_delete = client.delete(f'/v1/memory/records/{record_id}', headers=bearer_headers(token_b))
+    forbidden_delete = request('DELETE', f'/v1/memory/records/{record_id}', headers=bearer_headers(token_b))
     assert forbidden_delete.status_code == 403
 
 
 def test_admin_can_manage_record_level_memory_for_other_client():
     target = create_client('Record Admin Target')
-    created = client.post(
+    created = request(
+        'POST',
         '/v1/memory/records',
         json={
             'client_id': target['client_id'],
@@ -233,13 +257,15 @@ def test_admin_can_manage_record_level_memory_for_other_client():
     assert created.status_code == 200
     record_id = created.json()['record_id']
 
-    fetched = client.get(
+    fetched = request(
+        'GET',
         f'/v1/memory/records/{record_id}',
         headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
     )
     assert fetched.status_code == 200
 
-    patched = client.patch(
+    patched = request(
+        'PATCH',
         f'/v1/memory/records/{record_id}',
         json={'summary': 'updated by admin'},
         headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
@@ -247,7 +273,8 @@ def test_admin_can_manage_record_level_memory_for_other_client():
     assert patched.status_code == 200
     assert patched.json()['summary'] == 'updated by admin'
 
-    deleted = client.delete(
+    deleted = request(
+        'DELETE',
         f'/v1/memory/records/{record_id}',
         headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
     )
@@ -259,7 +286,8 @@ def test_memory_summary_create_list_latest_and_get():
     token = issue_access_token(created)
     headers = bearer_headers(token)
 
-    first = client.post(
+    first = request(
+        'POST',
         '/v1/memory/summaries',
         json={
             'conversation_id': 'conv-1',
@@ -272,7 +300,8 @@ def test_memory_summary_create_list_latest_and_get():
     assert first.status_code == 200
     first_body = first.json()
 
-    second = client.post(
+    second = request(
+        'POST',
         '/v1/memory/summaries',
         json={
             'conversation_id': 'conv-1',
@@ -285,15 +314,15 @@ def test_memory_summary_create_list_latest_and_get():
     assert second.status_code == 200
     second_body = second.json()
 
-    listed = client.get('/v1/memory/summaries?conversation_id=conv-1', headers=headers)
+    listed = request('GET', '/v1/memory/summaries?conversation_id=conv-1', headers=headers)
     assert listed.status_code == 200
     assert len(listed.json()) >= 2
 
-    latest = client.get('/v1/memory/summaries/latest?conversation_id=conv-1', headers=headers)
+    latest = request('GET', '/v1/memory/summaries/latest?conversation_id=conv-1', headers=headers)
     assert latest.status_code == 200
     assert latest.json()['summary_id'] == second_body['summary_id']
 
-    fetched = client.get(f"/v1/memory/summaries/{first_body['summary_id']}", headers=headers)
+    fetched = request('GET', f"/v1/memory/summaries/{first_body['summary_id']}", headers=headers)
     assert fetched.status_code == 200
     assert fetched.json()['summary'] == 'First summary'
 
@@ -304,7 +333,8 @@ def test_memory_summary_cross_client_forbidden():
     token_a = issue_access_token(client_a)
     token_b = issue_access_token(client_b)
 
-    created = client.post(
+    created = request(
+        'POST',
         '/v1/memory/summaries',
         json={
             'conversation_id': 'conv-shared',
@@ -315,10 +345,11 @@ def test_memory_summary_cross_client_forbidden():
     assert created.status_code == 200
     summary_id = created.json()['summary_id']
 
-    forbidden_get = client.get(f'/v1/memory/summaries/{summary_id}', headers=bearer_headers(token_b))
+    forbidden_get = request('GET', f'/v1/memory/summaries/{summary_id}', headers=bearer_headers(token_b))
     assert forbidden_get.status_code == 403
 
-    forbidden_list = client.get(
+    forbidden_list = request(
+        'GET',
         f"/v1/memory/summaries?client_id={client_a['client_id']}",
         headers=bearer_headers(token_b),
     )

@@ -1,15 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from service.ai import AIService
-from service.api.deps import ensure_primary_client
-from service.memory import MemoryStore
+from service.api.deps import ensure_primary_client, get_runtime
 from service.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix='/ui', tags=['ui'], redirect_slashes=False)
 root_router = APIRouter(tags=['ui'])
-ai_service = AIService()
-memory_store = MemoryStore()
 
 
 @root_router.get('/', include_in_schema=False)
@@ -18,21 +14,22 @@ async def root_to_ui() -> RedirectResponse:
 
 
 @router.post('/chat', response_model=ChatResponse)
-async def ui_chat(request: ChatRequest):
-    primary = ensure_primary_client()
-    incoming_conversation_id = None if request.reset_conversation else request.conversation_id
-    conversation_id = memory_store.ensure_conversation_id(incoming_conversation_id)
+async def ui_chat(payload: ChatRequest, request: Request):
+    runtime = get_runtime(request)
+    primary = ensure_primary_client(request)
+    incoming_conversation_id = None if payload.reset_conversation else payload.conversation_id
+    conversation_id = runtime.memory_store.ensure_conversation_id(incoming_conversation_id)
 
-    history = memory_store.get_recent_messages(
+    history = runtime.memory_store.get_recent_messages(
         conversation_id,
-        limit=request.history_limit,
+        limit=payload.history_limit,
         client_id=primary['client_id'],
     )
-    reply = await ai_service.generate(request.message, history=history)
+    reply = await runtime.ai_service.generate(payload.message, history=history)
 
-    if request.persist:
-        memory_store.append_message(conversation_id, 'user', request.message, client_id=primary['client_id'])
-        memory_store.append_message(conversation_id, 'assistant', reply, client_id=primary['client_id'])
+    if payload.persist:
+        runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=primary['client_id'])
+        runtime.memory_store.append_message(conversation_id, 'assistant', reply, client_id=primary['client_id'])
 
     return ChatResponse(reply=reply, conversation_id=conversation_id, used_history=len(history))
 

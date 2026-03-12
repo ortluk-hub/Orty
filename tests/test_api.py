@@ -1,27 +1,36 @@
-from fastapi.testclient import TestClient
+import asyncio
+
+import httpx
 
 from service.api import app
 from service.config import settings
 
+async def _request(method: str, path: str, **kwargs) -> httpx.Response:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.request(method, path, **kwargs)
 
-client = TestClient(app)
+
+def request(method: str, path: str, **kwargs) -> httpx.Response:
+    return asyncio.run(_request(method, path, **kwargs))
 
 
 def test_health_endpoint_returns_ok_and_assistant_name():
-    response = client.get("/health")
+    response = request("GET", "/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "assistant": "Orty"}
 
 
 def test_chat_requires_registered_client_or_shared_secret():
-    response = client.post("/chat", json={"message": "hello"})
+    response = request("POST", "/chat", json={"message": "hello"})
 
     assert response.status_code == 401
 
 
 def test_chat_rejects_invalid_shared_secret():
-    response = client.post(
+    response = request(
+        "POST",
         "/chat",
         json={"message": "hello"},
         headers={"x-orty-secret": "invalid-secret"},
@@ -35,7 +44,8 @@ def test_chat_returns_configuration_message_when_api_key_missing(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    response = client.post(
+    response = request(
+        "POST",
         "/chat",
         json={"message": "hello"},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
@@ -51,14 +61,16 @@ def test_chat_reuses_conversation_id(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    first = client.post(
+    first = request(
+        "POST",
         "/chat",
         json={"message": "one"},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
     )
     first_id = first.json()["conversation_id"]
 
-    second = client.post(
+    second = request(
+        "POST",
         "/chat",
         json={"message": "two", "conversation_id": first_id},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
@@ -72,7 +84,8 @@ def test_chat_can_disable_persistence(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    first = client.post(
+    first = request(
+        "POST",
         "/chat",
         json={"message": "ephemeral", "persist": False},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
@@ -81,7 +94,8 @@ def test_chat_can_disable_persistence(monkeypatch):
     assert first.status_code == 200
     conv_id = first.json()["conversation_id"]
 
-    second = client.post(
+    second = request(
+        "POST",
         "/chat",
         json={"message": "follow-up", "conversation_id": conv_id},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
@@ -95,14 +109,16 @@ def test_chat_can_reset_conversation(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    first = client.post(
+    first = request(
+        "POST",
         "/chat",
         json={"message": "one"},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
     )
     first_id = first.json()["conversation_id"]
 
-    second = client.post(
+    second = request(
+        "POST",
         "/chat",
         json={"message": "two", "conversation_id": first_id, "reset_conversation": True},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
@@ -117,14 +133,16 @@ def test_chat_applies_history_limit(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    seed = client.post(
+    seed = request(
+        "POST",
         "/chat",
         json={"message": "seed"},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
     )
     conv_id = seed.json()["conversation_id"]
 
-    limited = client.post(
+    limited = request(
+        "POST",
         "/chat",
         json={"message": "limited", "conversation_id": conv_id, "history_limit": 1},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
@@ -135,7 +153,7 @@ def test_chat_applies_history_limit(monkeypatch):
 
 
 def test_ui_home_page_is_available():
-    response = client.get("/ui")
+    response = request("GET", "/ui")
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
@@ -144,20 +162,20 @@ def test_ui_home_page_is_available():
 
 
 def test_root_redirects_to_ui():
-    response = client.get("/", follow_redirects=False)
+    response = request("GET", "/", follow_redirects=False)
 
     assert response.status_code == 307
     assert response.headers["location"] == "/ui"
 
 
 def test_ui_home_page_trailing_slash_is_also_available_without_redirect():
-    response = client.get("/ui/", follow_redirects=False)
+    response = request("GET", "/ui/", follow_redirects=False)
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
 
 def test_ui_chat_messages_are_rendered_as_text_nodes():
-    response = client.get("/ui")
+    response = request("GET", "/ui")
 
     assert response.status_code == 200
     assert "createTextNode" in response.text
@@ -168,7 +186,7 @@ def test_ui_chat_uses_primary_client_auth_without_secret(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    response = client.post("/ui/chat", json={"message": "hello root"})
+    response = request("POST", "/ui/chat", json={"message": "hello root"})
     assert response.status_code == 200
     assert response.json()["conversation_id"]
 
@@ -177,7 +195,8 @@ def test_chat_returns_generation_metadata(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    response = client.post(
+    response = request(
+        "POST",
         "/chat",
         json={"message": "hello"},
         headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
@@ -194,7 +213,8 @@ def test_chat_accepts_escalation_context_and_echoes_context_metadata(monkeypatch
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
 
-    response = client.post(
+    response = request(
+        "POST",
         "/chat",
         json={
             "message": "handle this",

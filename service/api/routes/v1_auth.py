@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from service.api.deps import clients_repo, get_request_auth
+from service.api.deps import get_request_auth, get_runtime
 from service.models.schemas import (
     ClientIntrospectRequest,
     ClientIntrospectResponse,
@@ -17,8 +17,8 @@ router = APIRouter(prefix='/v1/auth', tags=['v1-auth'])
 
 
 @router.post('/token', response_model=ClientTokenResponse)
-async def issue_client_token(request: ClientTokenRequest):
-    token = clients_repo.issue_access_token(request.client_id, request.client_token)
+async def issue_client_token(payload: ClientTokenRequest, request: Request):
+    token = get_runtime(request).clients_repo.issue_access_token(payload.client_id, payload.client_token)
     if token is None:
         raise HTTPException(status_code=401, detail='Unauthorized')
     return ClientTokenResponse(**token)
@@ -42,11 +42,11 @@ async def auth_me(auth: dict = Depends(get_request_auth)):
 
 
 @router.post('/rotate', response_model=ClientRotateResponse)
-async def rotate_client_token(request: ClientRotateRequest):
-    rotated = clients_repo.rotate_client_token(
-        request.client_id,
-        request.client_token,
-        revoke_access_tokens=request.revoke_access_tokens,
+async def rotate_client_token(payload: ClientRotateRequest, request: Request):
+    rotated = get_runtime(request).clients_repo.rotate_client_token(
+        payload.client_id,
+        payload.client_token,
+        revoke_access_tokens=payload.revoke_access_tokens,
     )
     if rotated is None:
         raise HTTPException(status_code=401, detail='Unauthorized')
@@ -55,11 +55,12 @@ async def rotate_client_token(request: ClientRotateRequest):
 
 @router.post('/revoke', response_model=ClientRevokeResponse)
 async def revoke_access_token(
-    request: ClientRevokeRequest,
+    payload: ClientRevokeRequest,
+    request: Request,
     auth: dict = Depends(get_request_auth),
     authorization: str | None = Header(default=None),
 ):
-    token_to_revoke = request.access_token
+    token_to_revoke = payload.access_token
     current_bearer: str | None = None
     if authorization and authorization.lower().startswith('bearer '):
         current_bearer = authorization[7:].strip()
@@ -74,7 +75,7 @@ async def revoke_access_token(
     if not is_admin and token_to_revoke != current_bearer:
         raise HTTPException(status_code=403, detail='Forbidden')
 
-    revoked = clients_repo.revoke_access_token(token_to_revoke)
+    revoked = get_runtime(request).clients_repo.revoke_access_token(token_to_revoke)
     if not revoked:
         raise HTTPException(status_code=404, detail='Access token not found')
     return ClientRevokeResponse(revoked=True)
@@ -82,13 +83,14 @@ async def revoke_access_token(
 
 @router.post('/introspect', response_model=ClientIntrospectResponse)
 async def introspect_access_token(
-    request: ClientIntrospectRequest,
+    payload: ClientIntrospectRequest,
+    request: Request,
     auth: dict = Depends(get_request_auth),
 ):
     if not auth.get("is_admin"):
         raise HTTPException(status_code=403, detail='Forbidden')
 
-    result = clients_repo.inspect_access_token(request.access_token)
+    result = get_runtime(request).clients_repo.inspect_access_token(payload.access_token)
     if result is None:
         return ClientIntrospectResponse(found=False, active=False)
     return ClientIntrospectResponse(**result)

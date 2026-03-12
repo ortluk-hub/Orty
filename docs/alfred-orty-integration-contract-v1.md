@@ -1,7 +1,7 @@
 # Alfred-Orty Integration Contract v1
 
-Last updated: 2026-03-10
-Status: Draft for implementation alignment
+Last updated: 2026-03-12
+Status: Partially implemented, still evolving
 
 ## 1. Purpose
 
@@ -61,23 +61,47 @@ Cloud usage policy:
 
 - Conversation memory exists server-side and is scoped by `client_id + conversation_id`.
 - `/chat` supports conversation continuity and bounded history retrieval.
+- Explicit long-term memory APIs are implemented:
+  - `POST /v1/memory/records`
+  - `GET /v1/memory/records`
+  - `GET /v1/memory/records/{record_id}`
+  - `PATCH /v1/memory/records/{record_id}`
+  - `DELETE /v1/memory/records/{record_id}`
+  - `POST /v1/memory/summaries`
+  - `GET /v1/memory/summaries`
+- Alfred snapshot sync is implemented through:
+  - `POST /memory/sync` (compatibility route)
+  - `POST /v1/memory/sync` (versioned route)
+- Sync writes are canonicalized into `memory_records` rows using `external_key`, and records missing from a later sync snapshot are soft-deleted only within the sync-managed subset.
 
-### 5.2 Required future state (for Alfred)
+### 5.2 Current Alfred sync payload
 
-Add explicit long-term memory APIs so Alfred can store/retrieve durable memory independent of immediate chat history.
+Current sync request shape:
 
-Proposed API surface (v1 target):
+- `client` or `client_id` (optional override; admin only if targeting another client)
+- `memories[]`
+  - `key`
+  - `category`
+  - `summary`
+  - `sourceText`
+  - `createdAt`
+  - `updatedAt`
+  - `isPinned`
+  - `expiresAt`
 
-- `POST /v1/memory/records`
-  - Upsert/create memory record(s) for authenticated client.
-- `GET /v1/memory/records`
-  - Query by tags/type/time window/relevance.
-- `GET /v1/memory/records/{record_id}`
-  - Retrieve one record.
-- `PATCH /v1/memory/records/{record_id}`
-  - Update fields (importance, tags, summary, etc.).
-- `DELETE /v1/memory/records/{record_id}`
-  - Soft delete (default) with retention policy.
+Current sync response shape:
+
+- `status`
+- `syncedCount`
+- `memories[]` in canonical server form
+
+### 5.3 Remaining future state
+
+Further Alfred work still needed:
+
+- richer query/relevance semantics beyond CRUD + snapshot sync
+- explicit retention and expiration policies
+- production-facing rollout decisions for disabling legacy auth headers
 
 Minimum record fields:
 
@@ -99,9 +123,10 @@ Security and isolation requirements:
 
 1. Use bearer tokens for Alfred integration (`/v1/auth/token`).
 2. Alfred adopts `/v1/auth/me` health/identity check on startup.
-3. Implement `/v1/memory/*` APIs for explicit long-term memory.
-4. Turn off legacy header auth (`ALLOW_LEGACY_CLIENT_HEADERS=false`).
-5. Introduce optional cloud fallback policy controls (per-client policy and quotas).
+3. Use `/memory/sync` or `/v1/memory/sync` for Alfred snapshot memory sync.
+4. Expand Alfred use of `/v1/memory/*` for explicit long-term memory operations beyond snapshot sync.
+5. Turn off legacy header auth (`ALLOW_LEGACY_CLIENT_HEADERS=false`).
+6. Introduce optional cloud fallback policy controls (per-client policy and quotas).
 
 ## 8. Non-Goals
 

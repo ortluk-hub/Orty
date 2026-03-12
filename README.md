@@ -7,7 +7,7 @@ Orty is a modular, on-device AI assistant built with FastAPI and designed for cl
 ## Status
 
 Version: v0.1.0-alpha
-Current Phase: Client-instance auth + memory APIs + escalation handoff
+Current Phase: Alfred memory sync + runtime isolation hardening
 Next Phase: Alfred integration hardening
 
 ---
@@ -24,13 +24,16 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
 - SQLite-backed conversation memory with recent-history retrieval
 - Client-scoped long-term memory APIs (`/v1/memory/records` CRUD + `/v1/memory/summaries` checkpoints)
+- Alfred memory sync compatibility endpoints (`POST /memory/sync` and `POST /v1/memory/sync`) backed by canonical long-term memory records
 - Supervisor-managed bot lifecycle APIs with `heartbeat`, `code_review`, `automation_extensions`, and `codey` bot types
 - Conversation controls in `/chat` (`history_limit`, `reset_conversation`, `persist`)
 - Safer tool contracts with bounded tool input and stricter `owner/repo` validation for GitHub tools
 - Optional Orty cloud fallback path (`ENABLE_CLOUD_FALLBACK`) when local provider fails
+- Request-scoped runtime dependency wiring so API routes, UI routes, and supervisor services share the active app runtime instead of module-level singletons
+- Test runtime isolation for SQLite-backed APIs and supervisor flows, including safer async cleanup for bot tasks
 
 ### What comes next
-The next planned milestone is **Alfred wiring and production hardening**.
+The next planned milestone is **broader Alfred wiring and production hardening**.
 
 ### Integration Contract
 - Alfred-Orty integration contract (auth, escalation, and memory roadmap): `docs/alfred-orty-integration-contract-v1.md`

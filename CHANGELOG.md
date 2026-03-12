@@ -1,6 +1,8 @@
 ## Unreleased
 
 ### Added
+- Added Alfred memory sync compatibility endpoints at `POST /memory/sync` and `POST /v1/memory/sync`, with canonical sync snapshots backed by `memory_records` rows keyed by `external_key`.
+- Added sync-aware memory repository operations for upsert-by-external-key, canonical listing, and soft deletion of sync-managed records removed from the latest Alfred snapshot.
 - Added a new `codey` supervisor bot type that drafts a coding-agent architecture plan with intent-resolver routing, mode-scoped system prompts, cloud/local model fallback strategy, Docker sandbox policy, and restricted network guidance.
 - Refined the Android thin client UI with a polished command-centric experience, including a dedicated Command Center route and command modes for chat, task scheduling, reminders, alarms, and timers.
 - Added assistant command API plumbing for `/assistant/{command}` so major assistant actions can be routed to native integrations through backend bridges.
@@ -12,6 +14,7 @@
 - Added unit and API tests covering automation extension target normalization, planning events, and supervisor execution flow.
 
 ### Changed
+- Refactored API/runtime wiring around a request-scoped runtime container so routes, auth helpers, UI flows, and supervisor services resolve repositories and services from the active app runtime instead of process-global module singletons.
 - Refined the `codey` architecture payload with an explicit intent-resolver system prompt, stricter sandbox internet-policy fields, and concrete implementation notes for containerized tooling + Alembic-backed memory traces.
 - Added `/chat` conversation controls: `history_limit` (bounded 1-50), `reset_conversation`, and `persist` flags, and now return `used_history` in `ChatResponse` for observability.
 - Enforced safer tool contracts by rejecting oversized `/tool` input payloads (>2000 chars) and requiring strict `owner/repo` format for GitHub helper tools.
@@ -21,6 +24,7 @@
 - Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
 
 ### Fixed
+- Fixed async supervisor test teardown by cancelling leftover bot tasks in isolated runtimes and removing default-executor usage from the code-review bot path, which was delaying event-loop shutdown after tests.
 - Removed `android-thin-client/gradle/wrapper/gradle-wrapper.jar` from version control to keep PRs free of binary artifacts.
 - Fixed automation extension target normalization to treat scalar `integration_targets` strings as a single target instead of iterating character-by-character.
 - Guarded supervisor bot config parsing for `history_limit`/`max_proposals` with safe positive-int fallbacks so `null` or invalid values no longer crash planning before events are emitted.

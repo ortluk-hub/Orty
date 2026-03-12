@@ -94,7 +94,9 @@ async def run_code_review_bot(
             payload={"repository_url": repository_url, "branch": branch, "human_review_required": True},
         )
 
-        clone_dir = await asyncio.to_thread(_clone_repo, repository_url, branch)
+        # Run clone inline inside the bot task to avoid leaking default-executor
+        # worker shutdown time into async test teardown.
+        clone_dir = _clone_repo(repository_url, branch)
         event_writer.emit(
             bot_id=bot_id,
             owner_client_id=owner_client_id,
