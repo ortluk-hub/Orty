@@ -199,3 +199,39 @@ def test_memory_sync_replaces_only_sync_managed_subset():
     rows = listed.json()
     assert any(row["source"] == "manual" for row in rows)
     assert all(row["external_key"] != "project:one" for row in rows if row["external_key"])
+
+
+def test_memory_sync_returns_full_snapshot_without_truncating_count():
+    created = create_client("Sync Full Snapshot Client")
+    token = issue_access_token(created)
+
+    memories = []
+    for idx in range(205):
+        memories.append(
+            {
+                "key": f"project:{idx}",
+                "category": "PROJECT",
+                "summary": f"Memory {idx}",
+                "sourceText": f"Memory {idx}",
+                "createdAt": idx + 1,
+                "updatedAt": idx + 2,
+                "isPinned": idx % 2 == 0,
+                "expiresAt": None,
+            }
+        )
+
+    response = request(
+        "POST",
+        "/memory/sync",
+        json={
+            "client": "alfred-android",
+            "memories": memories,
+        },
+        headers=bearer_headers(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["syncedCount"] == 205
+    assert len(body["memories"]) == 205
+    assert {item["key"] for item in body["memories"]} == {f"project:{idx}" for idx in range(205)}

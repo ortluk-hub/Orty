@@ -320,16 +320,21 @@ class MemoryRecordsRepository:
                 )
         return self.get_active_record_by_external_key(client_id=client_id, external_key=external_key)
 
-    def list_active_sync_records(self, *, client_id: str, source: str, limit: int = 200) -> list[dict]:
+    def list_active_sync_records(self, *, client_id: str, source: str, limit: int | None = 200) -> list[dict]:
+        params: list[object] = [client_id, source]
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = " LIMIT ?"
+            params.append(limit)
         with self.db.connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM memory_records
                 WHERE client_id = ? AND source = ? AND deleted_at IS NULL
                 ORDER BY updated_at DESC
-                LIMIT ?
+                {limit_clause}
                 """,
-                (client_id, source, limit),
+                tuple(params),
             ).fetchall()
         results: list[dict] = []
         for row in rows:

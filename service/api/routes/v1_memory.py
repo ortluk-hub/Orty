@@ -98,7 +98,7 @@ def _sync_memories_impl(payload: MemorySyncRequest, auth: dict, runtime) -> Memo
     canonical = runtime.memory_records_repo.list_active_sync_records(
         client_id=target_client_id,
         source=SYNC_SOURCE,
-        limit=200,
+        limit=None,
     )
     return MemorySyncResponse(
         status="ok",
