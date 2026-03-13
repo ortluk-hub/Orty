@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 import base64
+from dataclasses import dataclass
+from html import unescape
 import inspect
 from pathlib import Path
 import re
@@ -15,9 +17,28 @@ from service.config import settings
 GenerateFn = Callable[[str, list[dict[str, str]]], Awaitable[str]]
 ToolResult = str | Awaitable[str]
 ToolFn = Callable[[str], ToolResult]
-ToolFn = Callable[[str], str]
 TOOL_INPUT_MAX_LENGTH = 2000
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+RESULT_BLOCK_SPLIT_PATTERN = re.compile(r'(?=<div class="result results_links)')
+RESULT_LINK_PATTERN = re.compile(
+    r'<a[^>]*class="result__a"[^>]*href="(?P<url>[^"]+)"[^>]*>(?P<title>.*?)</a>',
+    re.S,
+)
+RESULT_SNIPPET_PATTERN = re.compile(
+    r'<(?:a|div)[^>]*class="result__snippet"[^>]*>(?P<snippet>.*?)</(?:a|div)>',
+    re.S,
+)
+TAG_PATTERN = re.compile(r"<[^>]+>")
+TIME_LIKE_PATTERN = re.compile(r"\b\d{1,2}(?::\d{2})?\s?(?:a\.?m\.?|p\.?m\.?)\b", re.I)
+HOURS_HINT_PATTERN = re.compile(r"\b(open|close|closing|hour|hours)\b", re.I)
+SEARCH_RESULT_LIMIT = 3
+
+
+@dataclass
+class WebSearchResult:
+    title: str
+    url: str
+    snippet: str
 
 
 class GenerationResult(TypedDict):
@@ -38,6 +59,7 @@ class AIService:
         self._tools: dict[str, ToolFn] = {
             "echo": self._tool_echo,
             "utc_time": self._tool_utc_time,
+            "web_search": self._tool_web_search,
             "fs_pwd": self._tool_fs_pwd,
             "fs_list": self._tool_fs_list,
             "fs_read": self._tool_fs_read,
@@ -240,6 +262,29 @@ class AIService:
     async def _tool_utc_time(self, _: str) -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
+    async def _tool_web_search(self, tool_input: str) -> str:
+        query = tool_input.strip()
+        if not query:
+            return "Usage: /tool web_search <question>"
+
+        try:
+            results = await self._search_web(query)
+        except httpx.RequestError as exc:
+            return f"Web search failed: {exc}"
+        except ValueError as exc:
+            return str(exc)
+
+        if not results:
+            return f"No web search results found for '{query}'."
+
+        best = self._select_best_web_result(query, results)
+        summary = self._truncate_text(best.snippet or best.title, 260)
+        reply_lines = [f"I found this on the web: {best.title}."]
+        if summary and summary != best.title:
+            reply_lines.append(summary)
+        reply_lines.append(f"Source: {best.url}")
+        return "\n".join(reply_lines)
+
     async def _tool_fs_pwd(self, _: str) -> str:
         return str(Path.cwd())
 
@@ -400,3 +445,72 @@ class AIService:
             return "GitHub file is not valid UTF-8 text."
 
         return decoded
+
+    async def _search_web(self, query: str) -> list[WebSearchResult]:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            response = await client.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": query},
+                headers={"User-Agent": "Orty-AIService"},
+            )
+
+        if response.status_code != 200:
+            raise ValueError(f"Web search returned status {response.status_code}.")
+
+        return self._parse_web_results(response.text)
+
+    def _parse_web_results(self, html: str) -> list[WebSearchResult]:
+        results: list[WebSearchResult] = []
+        for block in RESULT_BLOCK_SPLIT_PATTERN.split(html):
+            if 'class="result__a"' not in block:
+                continue
+
+            link_match = RESULT_LINK_PATTERN.search(block)
+            if link_match is None:
+                continue
+
+            snippet_match = RESULT_SNIPPET_PATTERN.search(block)
+            title = self._clean_html_fragment(link_match.group("title"))
+            url = unescape(link_match.group("url")).strip()
+            snippet = self._clean_html_fragment(
+                snippet_match.group("snippet") if snippet_match is not None else ""
+            )
+            if not title or not url:
+                continue
+
+            results.append(WebSearchResult(title=title, url=url, snippet=snippet))
+            if len(results) >= SEARCH_RESULT_LIMIT:
+                break
+
+        return results
+
+    def _select_best_web_result(
+        self,
+        query: str,
+        results: list[WebSearchResult]
+    ) -> WebSearchResult:
+        normalized_query = query.lower()
+
+        def score(result: WebSearchResult) -> tuple[int, int]:
+            haystack = f"{result.title} {result.snippet}".lower()
+            points = 0
+            if TIME_LIKE_PATTERN.search(haystack):
+                points += 4
+            if HOURS_HINT_PATTERN.search(haystack):
+                points += 2
+            if "store locator" in haystack:
+                points -= 1
+            query_term_hits = sum(1 for term in normalized_query.split() if term and term in haystack)
+            return points, query_term_hits
+
+        return max(results, key=score)
+
+    def _clean_html_fragment(self, raw: str) -> str:
+        text = TAG_PATTERN.sub(" ", raw)
+        text = unescape(text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _truncate_text(self, text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3].rstrip() + "..."

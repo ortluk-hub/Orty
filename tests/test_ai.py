@@ -117,7 +117,7 @@ def test_generate_returns_available_tools_for_unknown_tool(monkeypatch):
 
     assert result == (
         "Tool 'missing' is not available. Available tools: "
-        "echo, fs_list, fs_pwd, fs_read, gh_file, gh_repo, gh_tree, utc_time."
+        "echo, fs_list, fs_pwd, fs_read, gh_file, gh_repo, gh_tree, utc_time, web_search."
     )
 
 

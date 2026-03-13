@@ -3,6 +3,7 @@ import asyncio
 import httpx
 
 from service.api import app
+from service.ai import WebSearchResult
 from service.config import settings
 
 async def _request(method: str, path: str, **kwargs) -> httpx.Response:
@@ -235,3 +236,33 @@ def test_chat_accepts_escalation_context_and_echoes_context_metadata(monkeypatch
     body = response.json()
     assert body["context_version"] == "v1"
     assert body["summary_id"] == "sum-123"
+
+
+def test_chat_web_search_tool_returns_top_result(monkeypatch):
+    async def fake_search(self, query: str):
+        assert query == "when does walmart close"
+        return [
+            WebSearchResult(
+                title="Walmart in Lehi, UT - Hours & Locations",
+                url="https://example.com/walmart-hours",
+                snippet="Open today until 11 PM. Updated this week."
+            )
+        ]
+
+    monkeypatch.setattr("service.ai.AIService._search_web", fake_search)
+
+    response = request(
+        "POST",
+        "/chat",
+        json={"message": "/tool web_search when does walmart close", "persist": False},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "tool"
+    assert body["handled_by"] == "tool"
+    assert body["fallback_used"] is False
+    assert "Walmart in Lehi, UT - Hours & Locations" in body["reply"]
+    assert "Open today until 11 PM." in body["reply"]
+    assert "https://example.com/walmart-hours" in body["reply"]
