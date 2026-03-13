@@ -205,6 +205,41 @@ class SQLiteDB:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS bug_reports (
+                    report_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    client TEXT,
+                    source TEXT,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    details TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    source_created_at INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(client_id) REFERENCES clients(client_id)
+                )
+                """
+            )
+            bug_report_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(bug_reports)").fetchall()
+            }
+            if "client" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN client TEXT")
+            if "source" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN source TEXT")
+            if "metadata_json" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+            if "source_created_at" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN source_created_at INTEGER")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_bug_reports_client_created ON bug_reports (client_id, created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_bug_reports_client_source_created ON bug_reports (client_id, source, created_at DESC)"
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bots (
                     bot_id TEXT PRIMARY KEY,
                     owner_client_id TEXT NOT NULL,

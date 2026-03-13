@@ -7,6 +7,7 @@ from service.api.routes.ui import root_router as ui_root_router
 from service.api.routes.ui import router as ui_router
 from service.api.routes.v1_auth import router as v1_auth_router
 from service.api.routes.v1_bots import router as v1_bots_router
+from service.api.routes.v1_bug_reports import router as v1_bug_reports_router
 from service.api.routes.v1_clients import router as v1_clients_router
 from service.api.routes.v1_memory import router as v1_memory_router
 from service.api.routes.v1_memory import compat_router as memory_sync_compat_router
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(v1_auth_router)
     app.include_router(v1_clients_router)
+    app.include_router(v1_bug_reports_router)
     app.include_router(v1_memory_router)
     app.include_router(memory_sync_compat_router)
     app.include_router(v1_bots_router)

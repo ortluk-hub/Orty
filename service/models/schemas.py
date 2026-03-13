@@ -186,6 +186,35 @@ class MemorySyncResponse(BaseModel):
     memories: list[MemorySyncItem] = Field(default_factory=list)
 
 
+class BugReportCreateRequest(BaseModel):
+    client: str | None = Field(default=None, min_length=1, max_length=100)
+    client_id: str | None = Field(default=None, min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2000)
+    details: str = Field(min_length=1, max_length=40000)
+    metadata: dict[str, str] = Field(default_factory=dict)
+    createdAt: int
+
+
+class BugReportCreateResponse(BaseModel):
+    status: str
+    report_id: str
+
+
+class BugReportRecordResponse(BaseModel):
+    report_id: str
+    client_id: str
+    client: str | None = None
+    source: str | None = None
+    title: str
+    summary: str
+    details: str
+    metadata: dict[str, str] = Field(default_factory=dict)
+    createdAt: int
+    created_at: str
+    updated_at: str
+
+
 class MemorySummaryCreateRequest(BaseModel):
     client_id: str | None = None
     conversation_id: str = Field(min_length=1, max_length=120)

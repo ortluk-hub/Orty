@@ -7,6 +7,7 @@ from service.ai import AIService
 from service.memory import MemoryStore
 from service.storage.bot_events_repo import BotEventsRepository
 from service.storage.bots_repo import BotsRepository
+from service.storage.bug_reports_repo import BugReportsRepository
 from service.storage.clients_repo import ClientsRepository
 from service.storage.db import SQLiteDB
 from service.storage.memory_records_repo import MemoryRecordsRepository
@@ -21,6 +22,7 @@ class RuntimeContainer:
     db: SQLiteDB
     clients_repo: ClientsRepository
     bots_repo: BotsRepository
+    bug_reports_repo: BugReportsRepository
     memory_records_repo: MemoryRecordsRepository
     memory_summaries_repo: MemorySummariesRepository
     bot_events_repo: BotEventsRepository
@@ -35,6 +37,7 @@ def build_runtime(db_path: str | None = None) -> RuntimeContainer:
     db = SQLiteDB(db_path)
     clients_repo = ClientsRepository(db)
     bots_repo = BotsRepository(db)
+    bug_reports_repo = BugReportsRepository(db)
     memory_records_repo = MemoryRecordsRepository(db)
     memory_summaries_repo = MemorySummariesRepository(db)
     bot_events_repo = BotEventsRepository(db)
@@ -47,6 +50,7 @@ def build_runtime(db_path: str | None = None) -> RuntimeContainer:
         db=db,
         clients_repo=clients_repo,
         bots_repo=bots_repo,
+        bug_reports_repo=bug_reports_repo,
         memory_records_repo=memory_records_repo,
         memory_summaries_repo=memory_summaries_repo,
         bot_events_repo=bot_events_repo,
