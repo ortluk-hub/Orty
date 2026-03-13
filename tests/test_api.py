@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 
@@ -266,3 +267,48 @@ def test_chat_web_search_tool_returns_top_result(monkeypatch):
     assert "Walmart in Lehi, UT - Hours & Locations" in body["reply"]
     assert "Open today until 11 PM." in body["reply"]
     assert "https://example.com/walmart-hours" in body["reply"]
+
+
+def test_chat_smart_home_tool_returns_success(monkeypatch):
+    monkeypatch.setattr(settings, "SMART_HOME_PROVIDER", "smartthings")
+    monkeypatch.setattr(settings, "SMARTTHINGS_PAT", "test-pat")
+    monkeypatch.setattr(
+        settings,
+        "SMARTTHINGS_DEVICE_MAP",
+        json.dumps(
+            {
+                "front door": {
+                    "device_id": "lock-123",
+                    "kind": "lock",
+                }
+            }
+        ),
+    )
+
+    async def fake_send(self, device_id: str, payload: dict) -> None:
+        assert device_id == "lock-123"
+        assert payload == {
+            "commands": [
+                {
+                    "component": "main",
+                    "capability": "lock",
+                    "command": "lock",
+                }
+            ]
+        }
+
+    monkeypatch.setattr("service.ai.AIService._smartthings_send_command", fake_send)
+
+    response = request(
+        "POST",
+        "/chat",
+        json={"message": "/tool smart_home lock the front door", "persist": False},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "tool"
+    assert body["handled_by"] == "tool"
+    assert body["fallback_used"] is False
+    assert body["reply"] == "I locked front door."

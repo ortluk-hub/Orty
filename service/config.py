@@ -31,6 +31,9 @@ class Settings:
         self.SQLITE_TIMEOUT_SECONDS: float = float(os.getenv("SQLITE_TIMEOUT_SECONDS", "5"))
 
         self.FS_READ_ROOT: str = os.getenv("FS_READ_ROOT", ".")
+        self.SMART_HOME_PROVIDER: str = os.getenv("SMART_HOME_PROVIDER", "").strip().lower()
+        self.SMARTTHINGS_PAT: str | None = os.getenv("SMARTTHINGS_PAT")
+        self.SMARTTHINGS_DEVICE_MAP: str = os.getenv("SMARTTHINGS_DEVICE_MAP", "{}")
 
         self.BOT_HEARTBEAT_DEFAULT_SECONDS: int = int(os.getenv("BOT_HEARTBEAT_DEFAULT_SECONDS", "10"))
         self.BOT_RUNNER_MAX_BOTS: int = int(os.getenv("BOT_RUNNER_MAX_BOTS", "25"))

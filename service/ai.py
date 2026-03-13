@@ -6,6 +6,7 @@ import base64
 from dataclasses import dataclass
 from html import unescape
 import inspect
+import json
 from pathlib import Path
 import re
 from typing import TypedDict
@@ -32,6 +33,7 @@ TAG_PATTERN = re.compile(r"<[^>]+>")
 TIME_LIKE_PATTERN = re.compile(r"\b\d{1,2}(?::\d{2})?\s?(?:a\.?m\.?|p\.?m\.?)\b", re.I)
 HOURS_HINT_PATTERN = re.compile(r"\b(open|close|closing|hour|hours)\b", re.I)
 SEARCH_RESULT_LIMIT = 3
+SMART_HOME_POLITE_PREFIX = re.compile(r"^\s*(?:please\s+)+", re.I)
 
 
 @dataclass
@@ -39,6 +41,22 @@ class WebSearchResult:
     title: str
     url: str
     snippet: str
+
+
+@dataclass(frozen=True)
+class SmartHomeDevice:
+    name: str
+    device_id: str
+    kind: str
+    component: str = "main"
+    aliases: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SmartHomeRequest:
+    action: str
+    target: str
+    value: int | None = None
 
 
 class GenerationResult(TypedDict):
@@ -60,6 +78,7 @@ class AIService:
             "echo": self._tool_echo,
             "utc_time": self._tool_utc_time,
             "web_search": self._tool_web_search,
+            "smart_home": self._tool_smart_home,
             "fs_pwd": self._tool_fs_pwd,
             "fs_list": self._tool_fs_list,
             "fs_read": self._tool_fs_read,
@@ -285,6 +304,56 @@ class AIService:
         reply_lines.append(f"Source: {best.url}")
         return "\n".join(reply_lines)
 
+    async def _tool_smart_home(self, tool_input: str) -> str:
+        command_text = tool_input.strip()
+        if not command_text:
+            return "Usage: /tool smart_home <command>"
+
+        if settings.SMART_HOME_PROVIDER != "smartthings":
+            return (
+                "Smart-home control unavailable: configure SMART_HOME_PROVIDER=smartthings, "
+                "SMARTTHINGS_PAT, and SMARTTHINGS_DEVICE_MAP on Orty."
+            )
+
+        if not settings.SMARTTHINGS_PAT:
+            return "Smart-home control unavailable: SMARTTHINGS_PAT is not configured."
+
+        devices = self._load_smartthings_devices()
+        if not devices:
+            return (
+                "Smart-home control unavailable: SMARTTHINGS_DEVICE_MAP is empty or invalid."
+            )
+
+        parsed = self._parse_smart_home_request(command_text)
+        if parsed is None:
+            return (
+                "I couldn't parse that smart-home command. "
+                "Try phrases like 'turn off the living room lights' or "
+                "'set the thermostat to 68'."
+            )
+
+        device = self._match_smart_home_device(parsed.target, devices)
+        if device is None:
+            return (
+                f"I couldn't find a configured smart-home device matching '{parsed.target}'."
+            )
+
+        command_body, success_reply = self._build_smartthings_command(device, parsed)
+        if command_body is None or success_reply is None:
+            return (
+                f"I couldn't map '{command_text}' to a supported command for {device.name}. "
+                "Check the device kind in SMARTTHINGS_DEVICE_MAP."
+            )
+
+        try:
+            await self._smartthings_send_command(device.device_id, command_body)
+        except httpx.RequestError as exc:
+            return f"Smart-home request failed: {exc}"
+        except ValueError as exc:
+            return str(exc)
+
+        return success_reply
+
     async def _tool_fs_pwd(self, _: str) -> str:
         return str(Path.cwd())
 
@@ -445,6 +514,256 @@ class AIService:
             return "GitHub file is not valid UTF-8 text."
 
         return decoded
+
+    def _load_smartthings_devices(self) -> list[SmartHomeDevice]:
+        raw = settings.SMARTTHINGS_DEVICE_MAP.strip()
+        if not raw:
+            return []
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+
+        entries: list[dict] = []
+        if isinstance(payload, dict):
+            for alias, config in payload.items():
+                if isinstance(config, str):
+                    entries.append(
+                        {
+                            "name": alias,
+                            "device_id": config,
+                            "kind": "switch",
+                            "aliases": [alias],
+                        }
+                    )
+                elif isinstance(config, dict):
+                    merged = dict(config)
+                    merged.setdefault("name", alias)
+                    aliases = list(merged.get("aliases") or [])
+                    aliases.append(alias)
+                    merged["aliases"] = aliases
+                    entries.append(merged)
+        elif isinstance(payload, list):
+            entries = [item for item in payload if isinstance(item, dict)]
+
+        devices: list[SmartHomeDevice] = []
+        for entry in entries:
+            device_id = str(entry.get("device_id") or entry.get("id") or "").strip()
+            name = str(entry.get("name") or "").strip()
+            kind = str(entry.get("kind") or "switch").strip().lower()
+            component = str(entry.get("component") or "main").strip() or "main"
+            aliases = tuple(
+                {
+                    self._normalize_smart_home_alias(alias)
+                    for alias in [name, *(entry.get("aliases") or [])]
+                    if str(alias).strip()
+                }
+            )
+            if not device_id or not name or not aliases:
+                continue
+            devices.append(
+                SmartHomeDevice(
+                    name=name,
+                    device_id=device_id,
+                    kind=kind,
+                    component=component,
+                    aliases=aliases,
+                )
+            )
+
+        return devices
+
+    def _parse_smart_home_request(self, command_text: str) -> SmartHomeRequest | None:
+        normalized = self._normalize_smart_home_alias(command_text)
+        normalized = SMART_HOME_POLITE_PREFIX.sub("", normalized).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+        if not normalized:
+            return None
+
+        for prefix, action in (
+            ("turn on ", "on"),
+            ("switch on ", "on"),
+            ("turn off ", "off"),
+            ("switch off ", "off"),
+            ("lock ", "lock"),
+            ("unlock ", "unlock"),
+            ("open ", "open"),
+            ("close ", "close"),
+            ("start ", "on"),
+            ("stop ", "off"),
+        ):
+            if normalized.startswith(prefix):
+                target = self._normalize_smart_home_target(normalized[len(prefix):])
+                return SmartHomeRequest(action=action, target=target) if target else None
+
+        value_match = re.match(
+            r"^(set|dim|brighten|raise|lower)\s+(.+?)\s+to\s+(\d{1,3})(?:\s*(?:degrees?|percent))?\s*$",
+            normalized,
+        )
+        if value_match:
+            action_word = value_match.group(1)
+            target = self._normalize_smart_home_target(value_match.group(2))
+            value = int(value_match.group(3))
+            if not target:
+                return None
+            if action_word in {"dim", "brighten"}:
+                return SmartHomeRequest(action="set_level", target=target, value=value)
+            return SmartHomeRequest(action="set_value", target=target, value=value)
+
+        return None
+
+    def _match_smart_home_device(
+        self,
+        target: str,
+        devices: list[SmartHomeDevice]
+    ) -> SmartHomeDevice | None:
+        normalized_target = self._normalize_smart_home_target(target)
+        if not normalized_target:
+            return None
+
+        candidates = sorted(
+            (
+                device
+                for device in devices
+                if any(
+                    alias == normalized_target or
+                    alias in normalized_target or
+                    normalized_target in alias
+                    for alias in device.aliases
+                )
+            ),
+            key=lambda device: max(len(alias) for alias in device.aliases),
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+
+    def _build_smartthings_command(
+        self,
+        device: SmartHomeDevice,
+        request: SmartHomeRequest,
+    ) -> tuple[dict | None, str | None]:
+        if device.kind == "switch" and request.action in {"on", "off"}:
+            return (
+                self._smartthings_command_body(
+                    device,
+                    capability="switch",
+                    command=request.action,
+                ),
+                f"I turned {'on' if request.action == 'on' else 'off'} {device.name}.",
+            )
+
+        if device.kind == "dimmer":
+            if request.action in {"on", "off"}:
+                return (
+                    self._smartthings_command_body(
+                        device,
+                        capability="switch",
+                        command=request.action,
+                    ),
+                    f"I turned {request.action} {device.name}.",
+                )
+            if request.action in {"set_level", "set_value"} and request.value is not None:
+                level = max(0, min(request.value, 100))
+                return (
+                    self._smartthings_command_body(
+                        device,
+                        capability="switchLevel",
+                        command="setLevel",
+                        arguments=[level],
+                    ),
+                    f"I set {device.name} to {level}%.",
+                )
+
+        if device.kind == "lock" and request.action in {"lock", "unlock"}:
+            return (
+                self._smartthings_command_body(
+                    device,
+                    capability="lock",
+                    command=request.action,
+                ),
+                f"I {'locked' if request.action == 'lock' else 'unlocked'} {device.name}.",
+            )
+
+        if device.kind == "door" and request.action in {"open", "close"}:
+            return (
+                self._smartthings_command_body(
+                    device,
+                    capability="doorControl",
+                    command=request.action,
+                ),
+                f"I {'opened' if request.action == 'open' else 'closed'} {device.name}.",
+            )
+
+        if device.kind == "thermostat_heat" and request.action == "set_value" and request.value is not None:
+            value = max(40, min(request.value, 95))
+            return (
+                self._smartthings_command_body(
+                    device,
+                    capability="thermostatHeatingSetpoint",
+                    command="setHeatingSetpoint",
+                    arguments=[value],
+                ),
+                f"I set {device.name} to {value} degrees.",
+            )
+
+        if device.kind == "thermostat_cool" and request.action == "set_value" and request.value is not None:
+            value = max(55, min(request.value, 95))
+            return (
+                self._smartthings_command_body(
+                    device,
+                    capability="thermostatCoolingSetpoint",
+                    command="setCoolingSetpoint",
+                    arguments=[value],
+                ),
+                f"I set {device.name} to {value} degrees.",
+            )
+
+        return None, None
+
+    def _smartthings_command_body(
+        self,
+        device: SmartHomeDevice,
+        *,
+        capability: str,
+        command: str,
+        arguments: list[int] | None = None,
+    ) -> dict:
+        entry = {
+            "component": device.component,
+            "capability": capability,
+            "command": command,
+        }
+        if arguments:
+            entry["arguments"] = arguments
+        return {"commands": [entry]}
+
+    async def _smartthings_send_command(self, device_id: str, payload: dict) -> None:
+        headers = {
+            "Authorization": f"Bearer {settings.SMARTTHINGS_PAT}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                f"https://api.smartthings.com/v1/devices/{device_id}/commands",
+                headers=headers,
+                json=payload,
+            )
+
+        if response.status_code >= 400:
+            raise ValueError(
+                f"Smart-home request failed ({response.status_code}): {response.text}"
+            )
+
+    def _normalize_smart_home_alias(self, value: str) -> str:
+        return re.sub(r"\s+", " ", value.strip().lower())
+
+    def _normalize_smart_home_target(self, value: str) -> str:
+        cleaned = self._normalize_smart_home_alias(value)
+        cleaned = re.sub(r"^(?:the|my|a|an)\s+", "", cleaned)
+        cleaned = re.sub(r"\bplease\b", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
 
     async def _search_web(self, query: str) -> list[WebSearchResult]:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:

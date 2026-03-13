@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 
@@ -117,7 +118,7 @@ def test_generate_returns_available_tools_for_unknown_tool(monkeypatch):
 
     assert result == (
         "Tool 'missing' is not available. Available tools: "
-        "echo, fs_list, fs_pwd, fs_read, gh_file, gh_repo, gh_tree, utc_time, web_search."
+        "echo, fs_list, fs_pwd, fs_read, gh_file, gh_repo, gh_tree, smart_home, utc_time, web_search."
     )
 
 
@@ -128,6 +129,57 @@ def test_generate_executes_fs_pwd_tool(monkeypatch):
     result = asyncio.run(service.generate("/tool fs_pwd"))
 
     assert result
+
+
+def test_generate_reports_when_smart_home_not_configured(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "SMART_HOME_PROVIDER", "")
+    monkeypatch.setattr(settings, "SMARTTHINGS_PAT", None)
+    monkeypatch.setattr(settings, "SMARTTHINGS_DEVICE_MAP", "{}")
+
+    result = asyncio.run(service.generate("/tool smart_home turn off the living room lights"))
+
+    assert "Smart-home control unavailable" in result
+    assert "SMART_HOME_PROVIDER=smartthings" in result
+
+
+def test_generate_executes_smart_home_tool_with_smartthings(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "SMART_HOME_PROVIDER", "smartthings")
+    monkeypatch.setattr(settings, "SMARTTHINGS_PAT", "test-pat")
+    monkeypatch.setattr(
+        settings,
+        "SMARTTHINGS_DEVICE_MAP",
+        json.dumps(
+            {
+                "living room lights": {
+                    "device_id": "device-123",
+                    "kind": "switch",
+                    "aliases": ["living room light", "lights"],
+                }
+            }
+        ),
+    )
+
+    async def fake_send(self, device_id, payload):
+        assert device_id == "device-123"
+        assert payload == {
+            "commands": [
+                {
+                    "component": "main",
+                    "capability": "switch",
+                    "command": "off",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(AIService, "_smartthings_send_command", fake_send)
+
+    result = asyncio.run(service.generate("/tool smart_home turn off the living room lights"))
+
+    assert result == "I turned off living room lights."
 
 
 def test_generate_executes_fs_list_tool(tmp_path, monkeypatch):
