@@ -37,6 +37,8 @@ The next planned milestone is **broader Alfred wiring and production hardening**
 
 ### Integration Contract
 - Alfred-Orty integration contract (auth, escalation, and memory roadmap): `docs/alfred-orty-integration-contract-v1.md`
+- Codey supervised-worker integration request: `docs/codey-supervisor-integration-request-v1.md`
+- Orty-related projects standard operating procedure: `docs/orty-related-projects-sop-v1.md`
 
 ### User Interface Status
 - Orty now includes a **simple built-in web UI** for quick manual testing.
