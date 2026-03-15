@@ -73,6 +73,7 @@ class AIService:
         self._providers: dict[str, GenerateFn] = {
             "openai": self._generate_openai,
             "ollama": self._generate_ollama,
+            "ollama_cloud": self._generate_ollama_cloud,
         }
         self._tools: dict[str, ToolFn] = {
             "echo": self._tool_echo,
@@ -165,7 +166,7 @@ class AIService:
 
     def _is_provider_error(self, provider: str, reply: str) -> bool:
         normalized = provider.lower()
-        if normalized == "ollama":
+        if normalized in {"ollama", "ollama_cloud"}:
             return reply.startswith("Ollama is not reachable.") or reply.startswith("Ollama error:")
         if normalized == "openai":
             return reply == "OPENAI_API_KEY not configured." or reply.startswith("OpenAI error:")
@@ -185,7 +186,7 @@ class AIService:
             return "cloud-fallback"
         if normalized == "ollama":
             return "orty-local"
-        if normalized == "openai":
+        if normalized in {"openai", "ollama_cloud"}:
             return "cloud-primary"
         return normalized
 
@@ -221,8 +222,17 @@ class AIService:
         return data["choices"][0]["message"]["content"]
 
     async def _generate_ollama(self, message: str, history: list[dict[str, str]]) -> str:
+        return await self._generate_ollama_with_model(settings.OLLAMA_MODEL, message, history)
+
+    async def _generate_ollama_cloud(self, message: str, history: list[dict[str, str]]) -> str:
+        model = settings.OLLAMA_CLOUD_FALLBACK_MODEL.strip()
+        if not model:
+            return "Ollama error: cloud fallback model not configured."
+        return await self._generate_ollama_with_model(model, message, history)
+
+    async def _generate_ollama_with_model(self, model: str, message: str, history: list[dict[str, str]]) -> str:
         payload = {
-            "model": settings.OLLAMA_MODEL,
+            "model": model,
             "stream": False,
             "messages": [
                 {"role": "system", "content": self.system_prompt},

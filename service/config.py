@@ -22,6 +22,9 @@ class Settings:
 
         self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
         self.OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:4b")
+        self.OLLAMA_CLOUD_FALLBACK_MODEL: str = os.getenv(
+            "OLLAMA_CLOUD_FALLBACK_MODEL", "qwen3-coder:480b-cloud"
+        )
         self.ENABLE_CLOUD_FALLBACK: bool = os.getenv(
             "ENABLE_CLOUD_FALLBACK", "false"
         ).strip().lower() in {"1", "true", "yes", "on"}

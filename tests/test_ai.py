@@ -48,7 +48,7 @@ def test_generate_returns_clear_message_for_unsupported_provider(monkeypatch):
 
     result = asyncio.run(service.generate("hello"))
 
-    assert result == "Unsupported LLM_PROVIDER 'anthropic'. Available providers: ollama, openai."
+    assert result == "Unsupported LLM_PROVIDER 'anthropic'. Available providers: ollama, ollama_cloud, openai."
 
 
 def test_generate_can_use_registered_custom_provider(monkeypatch):
@@ -268,6 +268,26 @@ def test_generate_can_fallback_to_openai_when_ollama_fails(monkeypatch):
 
     service.register_provider("ollama", fake_ollama)
     service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate("hello"))
+
+    assert result == "cloud-reply"
+
+
+def test_generate_can_fallback_to_ollama_cloud_when_local_ollama_fails(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", True)
+    monkeypatch.setattr(settings, "CLOUD_FALLBACK_PROVIDER", "ollama_cloud")
+
+    async def fake_ollama(message, history):
+        return "Ollama error: local model overloaded"
+
+    async def fake_ollama_cloud(message, history):
+        return "cloud-reply"
+
+    service.register_provider("ollama", fake_ollama)
+    service.register_provider("ollama_cloud", fake_ollama_cloud)
 
     result = asyncio.run(service.generate("hello"))
 

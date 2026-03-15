@@ -194,6 +194,8 @@ OPENAI_API_KEY=your_openai_key_here
 # optional cloud fallback from local failures
 ENABLE_CLOUD_FALLBACK=false
 CLOUD_FALLBACK_PROVIDER=openai
+# set CLOUD_FALLBACK_PROVIDER=ollama_cloud to reuse Ollama Cloud on the same host
+# OLLAMA_CLOUD_FALLBACK_MODEL=qwen3-coder:480b-cloud
 # local model settings
 # OLLAMA_BASE_URL=http://localhost:11434
 # OLLAMA_MODEL=qwen2.5:3b
