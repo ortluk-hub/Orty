@@ -4,6 +4,8 @@ import json
 import httpx
 
 from service.api import app
+from service.api.routes import v1_stt
+from service.api.routes import v1_tts
 from service.ai import WebSearchResult
 from service.config import settings
 
@@ -15,6 +17,13 @@ async def _request(method: str, path: str, **kwargs) -> httpx.Response:
 
 def request(method: str, path: str, **kwargs) -> httpx.Response:
     return asyncio.run(_request(method, path, **kwargs))
+
+
+def _force_serial_openai(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
 
 
 def test_health_endpoint_returns_ok_and_assistant_name():
@@ -42,9 +51,124 @@ def test_chat_rejects_invalid_shared_secret():
     assert response.json() == {"detail": "Unauthorized"}
 
 
+def test_stt_proxy_requires_auth():
+    response = request(
+        "POST",
+        "/v1/stt/recognize",
+        json={"audio_base64": "AQID", "language_code": "en-US", "api_key": "test-key"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_stt_proxy_returns_transcript(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        reason_phrase = "OK"
+        content = b'{"results":[{"alternatives":[{"transcript":"hello from orty"}]}]}'
+
+        def json(self):
+            return json.loads(self.content.decode("utf-8"))
+
+    async def fake_post_google_speech(api_key: str, request_body: dict):
+        assert api_key == "test-key"
+        assert request_body["audio"]["content"] == "AQID"
+        return FakeResponse()
+
+    monkeypatch.setattr(v1_stt, "_post_google_speech", fake_post_google_speech)
+
+    response = request(
+        "POST",
+        "/v1/stt/recognize",
+        json={"audio_base64": "AQID", "language_code": "en-US", "api_key": "test-key"},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "transcript": "hello from orty",
+        "no_speech": False,
+        "provider": "google_speech_v1",
+    }
+
+
+def test_stt_proxy_returns_no_speech(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        reason_phrase = "OK"
+        content = b'{"results":[]}'
+
+        def json(self):
+            return {"results": []}
+
+    async def fake_post_google_speech(api_key: str, request_body: dict):
+        return FakeResponse()
+
+    monkeypatch.setattr(v1_stt, "_post_google_speech", fake_post_google_speech)
+
+    response = request(
+        "POST",
+        "/v1/stt/recognize",
+        json={"audio_base64": "AQID", "language_code": "en-US", "api_key": "test-key"},
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["no_speech"] is True
+
+
+def test_tts_proxy_requires_auth():
+    response = request(
+        "POST",
+        "/v1/tts/synthesize",
+        json={"text": "hello", "language_code": "en-US", "api_key": "test-key"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_tts_proxy_returns_audio(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        reason_phrase = "OK"
+        content = b'{"audioContent":"QUJDRA=="}'
+
+        def json(self):
+            return json.loads(self.content.decode("utf-8"))
+
+    async def fake_post_google_tts(api_key: str, request_body: dict):
+        assert api_key == "test-key"
+        assert request_body["input"]["text"] == "hello from orty"
+        assert request_body["voice"]["languageCode"] == "en-US"
+        assert request_body["voice"]["name"] == "en-US-Neural2-F"
+        assert request_body["audioConfig"]["audioEncoding"] == "MP3"
+        return FakeResponse()
+
+    monkeypatch.setattr(v1_tts, "_post_google_tts", fake_post_google_tts)
+
+    response = request(
+        "POST",
+        "/v1/tts/synthesize",
+        json={
+            "text": "hello from orty",
+            "language_code": "en-US",
+            "api_key": "test-key",
+            "voice_name": "en-US-Neural2-F",
+            "audio_encoding": "MP3",
+        },
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "audio_base64": "QUJDRA==",
+        "audio_encoding": "MP3",
+        "provider": "google_tts_v1",
+    }
+
+
 def test_chat_returns_configuration_message_when_api_key_missing(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     response = request(
         "POST",
@@ -60,8 +184,7 @@ def test_chat_returns_configuration_message_when_api_key_missing(monkeypatch):
 
 
 def test_chat_reuses_conversation_id(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     first = request(
         "POST",
@@ -83,8 +206,7 @@ def test_chat_reuses_conversation_id(monkeypatch):
 
 
 def test_chat_can_disable_persistence(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     first = request(
         "POST",
@@ -108,8 +230,7 @@ def test_chat_can_disable_persistence(monkeypatch):
 
 
 def test_chat_can_reset_conversation(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     first = request(
         "POST",
@@ -132,8 +253,7 @@ def test_chat_can_reset_conversation(monkeypatch):
 
 
 def test_chat_applies_history_limit(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     seed = request(
         "POST",
@@ -176,6 +296,54 @@ def test_ui_home_page_trailing_slash_is_also_available_without_redirect():
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
 
+
+def test_homepage_is_available():
+    response = request("GET", "/homepage")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Alfred + Orty" in response.text
+    assert "/privacy-policy" in response.text
+    assert "/jane-charter" in response.text
+    assert "/voice-and-identity-contract" in response.text
+    assert "/monetization-guardrails" in response.text
+
+
+def test_privacy_policy_is_available():
+    response = request("GET", "/privacy-policy")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Privacy Policy" in response.text
+    assert "Effective date: March 20, 2026" in response.text
+
+
+def test_jane_charter_page_is_available():
+    response = request("GET", "/jane-charter")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Jane Charter" in response.text
+    assert "persistent across sessions" in response.text
+
+
+def test_voice_and_identity_contract_page_is_available():
+    response = request("GET", "/voice-and-identity-contract")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Voice And Identity Contract" in response.text
+    assert "Voice is part of identity" in response.text
+
+
+def test_monetization_guardrails_page_is_available():
+    response = request("GET", "/monetization-guardrails")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Monetization Guardrails" in response.text
+    assert "free tier should remain a real assistant" in response.text.lower()
+
 def test_ui_chat_messages_are_rendered_as_text_nodes():
     response = request("GET", "/ui")
 
@@ -185,8 +353,7 @@ def test_ui_chat_messages_are_rendered_as_text_nodes():
 
 
 def test_ui_chat_uses_primary_client_auth_without_secret(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     response = request("POST", "/ui/chat", json={"message": "hello root"})
     assert response.status_code == 200
@@ -194,8 +361,7 @@ def test_ui_chat_uses_primary_client_auth_without_secret(monkeypatch):
 
 
 def test_chat_returns_generation_metadata(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     response = request(
         "POST",
@@ -212,8 +378,7 @@ def test_chat_returns_generation_metadata(monkeypatch):
 
 
 def test_chat_accepts_escalation_context_and_echoes_context_metadata(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    _force_serial_openai(monkeypatch)
 
     response = request(
         "POST",
@@ -311,4 +476,4 @@ def test_chat_smart_home_tool_returns_success(monkeypatch):
     assert body["provider"] == "tool"
     assert body["handled_by"] == "tool"
     assert body["fallback_used"] is False
-    assert body["reply"] == "I locked front door."
+    assert body["reply"] == "I updated front door."

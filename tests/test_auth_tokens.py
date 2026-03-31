@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -40,6 +41,14 @@ def issue_access_token(client_data: dict) -> dict:
     return response.json()
 
 
+def set_client_last_seen(client_id: str, when_iso: str) -> None:
+    with app.state.runtime.db.connect() as conn:
+        conn.execute(
+            "UPDATE clients SET last_seen_at = ? WHERE client_id = ?",
+            (when_iso, client_id),
+        )
+
+
 def test_issue_access_token_with_valid_client_credentials():
     created = create_client('Token Client')
 
@@ -58,6 +67,8 @@ def test_issue_access_token_with_valid_client_credentials():
     assert body['token_type'] == 'bearer'
     assert body['client_id'] == created['client_id']
     assert body['expires_in'] > 0
+    assert created['access_tier'] == 'free'
+    assert created['lifecycle_status'] == 'active'
 
 
 def test_issue_access_token_rejects_invalid_client_token():
@@ -202,6 +213,89 @@ def test_auth_me_returns_authenticated_client_context():
     assert body['client_id'] == created['client_id']
     assert body['auth_method'] == 'bearer'
     assert body['is_admin'] is False
+    assert body['access_tier'] == 'free'
+    assert body['lifecycle_status'] == 'active'
+
+
+def test_admin_can_update_client_access_tier():
+    created = create_client('Tiered Client')
+    admin_headers = {'x-orty-secret': settings.ORTY_SHARED_SECRET}
+
+    response = request(
+        'PATCH',
+        f"/v1/clients/{created['client_id']}/access-tier",
+        json={'access_tier': 'premium'},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['client_id'] == created['client_id']
+    assert body['access_tier'] == 'premium'
+    assert body['lifecycle_status'] == 'active'
+
+
+def test_revoked_client_can_no_longer_authenticate_or_chat(monkeypatch):
+    monkeypatch.setattr(settings, 'LLM_PROVIDER', 'openai')
+    monkeypatch.setattr(settings, 'OPENAI_API_KEY', None)
+
+    created = create_client('Revoked Client')
+    token = issue_access_token(created)
+
+    revoke = request(
+        'POST',
+        f"/v1/clients/{created['client_id']}/revoke",
+        headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
+    )
+    assert revoke.status_code == 200
+    assert revoke.json()['lifecycle_status'] == 'revoked'
+
+    token_response = request(
+        'POST',
+        '/v1/auth/token',
+        json={
+            'client_id': created['client_id'],
+            'client_token': created['client_token'],
+        },
+    )
+    assert token_response.status_code == 401
+
+    chat = request(
+        'POST',
+        '/chat',
+        json={'message': 'still there?'},
+        headers={'Authorization': f"Bearer {token['access_token']}"},
+    )
+    assert chat.status_code == 401
+
+
+def test_client_disconnect_revokes_itself():
+    created = create_client('Disconnect Client')
+    token = issue_access_token(created)
+    bearer_headers = {'Authorization': f"Bearer {token['access_token']}"}
+
+    response = request('POST', '/v1/clients/me/disconnect', headers=bearer_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['client_id'] == created['client_id']
+    assert body['lifecycle_status'] == 'revoked'
+
+
+def test_list_clients_marks_old_clients_as_stale():
+    created = create_client('Stale Client')
+    stale_at = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    set_client_last_seen(created['client_id'], stale_at)
+
+    response = request(
+        'GET',
+        '/v1/clients',
+        headers={'x-orty-secret': settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    stale_client = next(item for item in response.json() if item['client_id'] == created['client_id'])
+    assert stale_client['lifecycle_status'] == 'stale'
 
 
 def test_auth_introspect_is_admin_only():

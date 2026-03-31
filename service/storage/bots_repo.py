@@ -30,6 +30,21 @@ class BotsRepository:
         bot["config"] = json.loads(bot.pop("config_json"))
         return bot
 
+    def list_bots(self, owner_client_id: str | None = None, limit: int = 50) -> list[dict]:
+        params: tuple = (limit,)
+        query = "SELECT * FROM bots ORDER BY updated_at DESC LIMIT ?"
+        if owner_client_id is not None:
+            query = "SELECT * FROM bots WHERE owner_client_id = ? ORDER BY updated_at DESC LIMIT ?"
+            params = (owner_client_id, limit)
+        with self.db.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        bots: list[dict] = []
+        for row in rows:
+            bot = dict(row)
+            bot["config"] = json.loads(bot.pop("config_json"))
+            bots.append(bot)
+        return bots
+
     def update_status(self, bot_id: str, status: str) -> dict | None:
         now = utc_now_iso()
         with self.db.connect() as conn:
