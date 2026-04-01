@@ -1,8 +1,12 @@
+import base64
+import hashlib
+import hmac
 from html import escape
 from pathlib import Path
+import time
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from service.ai import ChatRequestContext
 from service.api.deps import ensure_primary_client, get_runtime
@@ -11,6 +15,8 @@ from service.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix='/ui', tags=['ui'], redirect_slashes=False)
 root_router = APIRouter(tags=['ui'])
+UI_SESSION_COOKIE = "orty_ui_session"
+UI_SESSION_TTL_SECONDS = 60 * 60 * 12
 
 
 def _candidate_alfred_roots() -> list[Path]:
@@ -107,9 +113,141 @@ def _render_markdown_document(title: str, path: Path) -> str:
 """
 
 
+def _sign_ui_session(expires_at: int) -> str:
+    secret = settings.ORTY_UI_ADMIN_SECRET
+    if not secret:
+        raise HTTPException(status_code=503, detail="UI admin login is not configured")
+    payload = f"admin:{expires_at}"
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    token = f"{payload}:{signature}"
+    return base64.urlsafe_b64encode(token.encode("utf-8")).decode("ascii")
+
+
+def _is_valid_ui_session(token: str | None) -> bool:
+    secret = settings.ORTY_UI_ADMIN_SECRET
+    if not secret:
+        return False
+    if not token:
+        return False
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        role, expires_at_raw, signature = decoded.split(":", 2)
+        if role != "admin":
+            return False
+        expires_at = int(expires_at_raw)
+    except Exception:
+        return False
+
+    expected_payload = f"admin:{expires_at}"
+    expected_signature = hmac.new(
+        secret.encode("utf-8"),
+        expected_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected_signature):
+        return False
+    return expires_at > int(time.time())
+
+
+def _is_ui_authenticated(request: Request) -> bool:
+    return _is_valid_ui_session(request.cookies.get(UI_SESSION_COOKIE))
+
+
+def _login_page(error: str | None = None) -> str:
+    login_ready = settings.ORTY_UI_ADMIN_SECRET is not None
+    error_html = (
+        f'<p class="error">{escape(error)}</p>'
+        if error
+        else '<p class="muted">Sign in as an admin to access the Orty Web UI.</p>'
+    )
+    disabled_html = (
+        '<p class="error">Admin web login is not configured on this deployment.</p>'
+        if not login_ready
+        else ""
+    )
+    form_html = (
+        """<form method="post" action="/ui/login">
+      <label for="shared_secret">Admin secret</label>
+      <input id="shared_secret" name="shared_secret" type="password" autocomplete="current-password" required />
+      <button type="submit">Enter Orty Web UI</button>
+    </form>"""
+        if login_ready
+        else ""
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Orty Admin Login</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 0; background: #10131a; color: #e7ecf3; }}
+    .container {{ max-width: 420px; margin: 8vh auto; padding: 24px; border-radius: 16px; background: #151c27; border: 1px solid #2a3444; }}
+    h1 {{ margin-top: 0; margin-bottom: 8px; }}
+    .muted {{ color: #9fa8b5; }}
+    .error {{ color: #ffb4ab; }}
+    label {{ display: block; margin: 16px 0 8px; }}
+    input, button {{ width: 100%; border-radius: 10px; border: 1px solid #2a3444; background: #0f141d; color: #e7ecf3; padding: 12px; box-sizing: border-box; }}
+    button {{ margin-top: 16px; cursor: pointer; background: #1f6feb; border-color: #1f6feb; }}
+    a {{ color: #8dd0ff; }}
+  </style>
+</head>
+<body>
+  <main class="container">
+    <p><a href="/homepage">Back to homepage</a></p>
+    <h1>Admin Login</h1>
+    {error_html}
+    {disabled_html}
+    {form_html}
+  </main>
+</body>
+</html>
+"""
+
+
 @root_router.get('/', include_in_schema=False)
 async def root_to_ui() -> RedirectResponse:
     return RedirectResponse(url='/ui', status_code=307)
+
+
+@router.get('/login', response_class=HTMLResponse)
+async def ui_login() -> str:
+    return _login_page()
+
+
+@router.post('/login')
+async def ui_login_submit(
+    request: Request,
+    shared_secret: str = Form(...),
+) -> Response:
+    expected_secret = settings.ORTY_UI_ADMIN_SECRET
+    if not expected_secret:
+        return HTMLResponse(_login_page("Admin web login is not configured."), status_code=503)
+
+    if not hmac.compare_digest(shared_secret, expected_secret):
+        return HTMLResponse(_login_page("Invalid admin secret."), status_code=401)
+
+    response = RedirectResponse(url='/ui', status_code=303)
+    response.set_cookie(
+        key=UI_SESSION_COOKIE,
+        value=_sign_ui_session(int(time.time()) + UI_SESSION_TTL_SECONDS),
+        max_age=UI_SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
+    return response
+
+
+@router.post('/logout')
+async def ui_logout() -> RedirectResponse:
+    response = RedirectResponse(url='/ui/login', status_code=303)
+    response.delete_cookie(UI_SESSION_COOKIE)
+    return response
 
 
 @root_router.get('/homepage', response_class=HTMLResponse, include_in_schema=False)
@@ -233,15 +371,19 @@ async def privacy_policy() -> str:
 
 @router.post('/chat', response_model=ChatResponse)
 async def ui_chat(payload: ChatRequest, request: Request):
+    if not _is_ui_authenticated(request):
+        raise HTTPException(status_code=401, detail='Unauthorized')
+
     runtime = get_runtime(request)
     primary = ensure_primary_client(request)
+    admin_client = {**primary, "is_admin": True}
     incoming_conversation_id = None if payload.reset_conversation else payload.conversation_id
     conversation_id = runtime.memory_store.ensure_conversation_id(incoming_conversation_id)
 
     history = runtime.memory_store.get_recent_messages(
         conversation_id,
         limit=payload.history_limit,
-        client_id=primary['client_id'],
+        client_id=admin_client['client_id'],
     )
     effective_history = [
         *history,
@@ -253,8 +395,8 @@ async def ui_chat(payload: ChatRequest, request: Request):
         request_context=ChatRequestContext(
             channel="orty_web_ui",
             conversation_id=conversation_id,
-            auth_method="primary-ui",
-            current_client=primary,
+            auth_method="admin-ui",
+            current_client=admin_client,
             requested_client_name="orty-web-ui",
             assistant_name="Orty",
             personality_preset=payload.personality_preset,
@@ -263,15 +405,18 @@ async def ui_chat(payload: ChatRequest, request: Request):
     )
 
     if payload.persist:
-        runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=primary['client_id'])
-        runtime.memory_store.append_message(conversation_id, 'assistant', reply, client_id=primary['client_id'])
+        runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=admin_client['client_id'])
+        runtime.memory_store.append_message(conversation_id, 'assistant', reply, client_id=admin_client['client_id'])
 
     return ChatResponse(reply=reply, conversation_id=conversation_id, used_history=len(history))
 
 
 @router.get('', response_class=HTMLResponse)
 @router.get('/', response_class=HTMLResponse)
-async def ui_home() -> str:
+async def ui_home(request: Request) -> Response:
+    if not _is_ui_authenticated(request):
+        return RedirectResponse(url='/ui/login', status_code=303)
+
     return """<!doctype html>
 <html lang=\"en\">
 <head>
@@ -299,7 +444,10 @@ async def ui_home() -> str:
 <body>
   <div class=\"container\">
     <h1>Orty Web UI</h1>
-    <p class=\"muted\">Primary root-user chat interface with conversation continuity.</p>
+    <p class=\"muted\">Admin-authenticated Orty chat interface with conversation continuity.</p>
+    <form method=\"post\" action=\"/ui/logout\" style=\"margin-bottom:16px;\">
+      <button type=\"submit\" style=\"width:auto;\">Log out</button>
+    </form>
 
     <div class=\"controls\">
       <input id=\"conversation-id\" type=\"text\" placeholder=\"conversation_id (optional)\" />
@@ -369,6 +517,10 @@ async def ui_home() -> str:
 
         const body = await response.json();
         if (!response.ok) {
+          if (response.status === 401) {
+            window.location.href = '/ui/login';
+            return;
+          }
           appendMessage('assistant', `Error: ${body.detail || response.status}`);
           statusEl.textContent = `Request failed (${response.status}).`;
           return;

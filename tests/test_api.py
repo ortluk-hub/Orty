@@ -19,6 +19,19 @@ def request(method: str, path: str, **kwargs) -> httpx.Response:
     return asyncio.run(_request(method, path, **kwargs))
 
 
+def _ui_admin_headers(monkeypatch) -> dict[str, str]:
+    monkeypatch.setattr(settings, "ORTY_UI_ADMIN_SECRET", "ui-admin-secret")
+    login = request(
+        "POST",
+        "/ui/login",
+        data={"shared_secret": "ui-admin-secret"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+    cookie = login.headers["set-cookie"].split(";", 1)[0]
+    return {"cookie": cookie}
+
+
 def _force_serial_openai(monkeypatch) -> None:
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
@@ -274,13 +287,12 @@ def test_chat_applies_history_limit(monkeypatch):
     assert limited.json()["used_history"] == 1
 
 
-def test_ui_home_page_is_available():
-    response = request("GET", "/ui")
+def test_ui_home_redirects_to_login_when_not_authenticated(monkeypatch):
+    monkeypatch.setattr(settings, "ORTY_UI_ADMIN_SECRET", "ui-admin-secret")
+    response = request("GET", "/ui", follow_redirects=False)
 
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    assert "Orty Web UI" in response.text
-    assert "Primary root-user chat interface with conversation continuity." in response.text
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/login"
 
 
 def test_root_redirects_to_ui():
@@ -290,11 +302,40 @@ def test_root_redirects_to_ui():
     assert response.headers["location"] == "/ui"
 
 
-def test_ui_home_page_trailing_slash_is_also_available_without_redirect():
+def test_ui_home_page_trailing_slash_redirects_to_login_when_not_authenticated(monkeypatch):
+    monkeypatch.setattr(settings, "ORTY_UI_ADMIN_SECRET", "ui-admin-secret")
     response = request("GET", "/ui/", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/login"
+
+
+def test_ui_login_page_is_available(monkeypatch):
+    monkeypatch.setattr(settings, "ORTY_UI_ADMIN_SECRET", "ui-admin-secret")
+    response = request("GET", "/ui/login")
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+    assert "Admin Login" in response.text
+    assert "Sign in as an admin" in response.text
+
+
+def test_ui_login_rejects_invalid_secret(monkeypatch):
+    monkeypatch.setattr(settings, "ORTY_UI_ADMIN_SECRET", "ui-admin-secret")
+    response = request("POST", "/ui/login", data={"shared_secret": "wrong"})
+
+    assert response.status_code == 401
+    assert "Invalid admin secret." in response.text
+
+
+def test_ui_login_sets_cookie_and_allows_ui(monkeypatch):
+    headers = _ui_admin_headers(monkeypatch)
+    response = request("GET", "/ui", headers=headers)
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Orty Web UI" in response.text
+    assert "Admin-authenticated Orty chat interface with conversation continuity." in response.text
 
 
 def test_homepage_is_available():
@@ -344,20 +385,40 @@ def test_monetization_guardrails_page_is_available():
     assert "Monetization Guardrails" in response.text
     assert "free tier should remain a real assistant" in response.text.lower()
 
-def test_ui_chat_messages_are_rendered_as_text_nodes():
-    response = request("GET", "/ui")
+def test_ui_chat_messages_are_rendered_as_text_nodes(monkeypatch):
+    response = request("GET", "/ui", headers=_ui_admin_headers(monkeypatch))
 
     assert response.status_code == 200
     assert "createTextNode" in response.text
     assert "div.innerHTML" not in response.text
 
 
-def test_ui_chat_uses_primary_client_auth_without_secret(monkeypatch):
-    _force_serial_openai(monkeypatch)
-
+def test_ui_chat_requires_admin_login_cookie(monkeypatch):
+    monkeypatch.setattr(settings, "ORTY_UI_ADMIN_SECRET", "ui-admin-secret")
     response = request("POST", "/ui/chat", json={"message": "hello root"})
+
+    assert response.status_code == 401
+
+
+def test_ui_chat_uses_admin_authenticated_session(monkeypatch):
+    runtime = app.state.runtime
+    captured: dict = {}
+
+    async def fake_generate(message, history=None, request_context=None):
+        captured["message"] = message
+        captured["request_context"] = request_context
+        return "admin-ok"
+
+    monkeypatch.setattr(runtime.ai_service, "generate", fake_generate)
+    headers = _ui_admin_headers(monkeypatch)
+
+    response = request("POST", "/ui/chat", json={"message": "hello root"}, headers=headers)
     assert response.status_code == 200
     assert response.json()["conversation_id"]
+    assert response.json()["reply"] == "admin-ok"
+    assert captured["message"] == "hello root"
+    assert captured["request_context"].auth_method == "admin-ui"
+    assert captured["request_context"].current_client["is_admin"] is True
 
 
 def test_chat_returns_generation_metadata(monkeypatch):
