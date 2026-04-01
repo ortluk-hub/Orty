@@ -6,22 +6,64 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from service.ai import ChatRequestContext
 from service.api.deps import ensure_primary_client, get_runtime
+from service.config import settings
 from service.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix='/ui', tags=['ui'], redirect_slashes=False)
 root_router = APIRouter(tags=['ui'])
-ALFRED_ROOT = Path('/home/ortluk/ortluk-hub/Alfred/Alfred')
-MISSION_DOCS = {
-    'jane-charter': ('Jane Charter', ALFRED_ROOT / 'JANE_CHARTER.md'),
-    'voice-and-identity-contract': (
-        'Voice And Identity Contract',
-        ALFRED_ROOT / 'VOICE_AND_IDENTITY_CONTRACT.md',
-    ),
-    'monetization-guardrails': (
-        'Monetization Guardrails',
-        ALFRED_ROOT / 'MONETIZATION_GUARDRAILS.md',
-    ),
-}
+
+
+def _candidate_alfred_roots() -> list[Path]:
+    configured = settings.ALFRED_DOCS_ROOT
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+
+    service_root = Path(__file__).resolve().parents[3]
+    cwd = Path.cwd()
+    candidates.extend(
+        [
+            cwd / 'Alfred' / 'Alfred',
+            cwd.parent / 'Alfred' / 'Alfred',
+            service_root.parent / 'Alfred' / 'Alfred',
+            Path('/home/ortluk/ortluk-hub/Alfred/Alfred'),
+        ]
+    )
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        normalized = candidate.resolve(strict=False)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _resolve_alfred_root() -> Path:
+    for candidate in _candidate_alfred_roots():
+        if candidate.exists():
+            return candidate
+    configured = settings.ALFRED_DOCS_ROOT
+    if configured:
+        return Path(configured).expanduser()
+    return _candidate_alfred_roots()[0]
+
+
+def _mission_docs() -> dict[str, tuple[str, Path]]:
+    alfred_root = _resolve_alfred_root()
+    return {
+        'jane-charter': ('Jane Charter', alfred_root / 'JANE_CHARTER.md'),
+        'voice-and-identity-contract': (
+            'Voice And Identity Contract',
+            alfred_root / 'VOICE_AND_IDENTITY_CONTRACT.md',
+        ),
+        'monetization-guardrails': (
+            'Monetization Guardrails',
+            alfred_root / 'MONETIZATION_GUARDRAILS.md',
+        ),
+    }
 
 
 def _render_markdown_document(title: str, path: Path) -> str:
@@ -117,19 +159,19 @@ async def homepage() -> str:
 
 @root_router.get('/jane-charter', response_class=HTMLResponse, include_in_schema=False)
 async def jane_charter() -> str:
-    title, path = MISSION_DOCS['jane-charter']
+    title, path = _mission_docs()['jane-charter']
     return _render_markdown_document(title, path)
 
 
 @root_router.get('/voice-and-identity-contract', response_class=HTMLResponse, include_in_schema=False)
 async def voice_and_identity_contract() -> str:
-    title, path = MISSION_DOCS['voice-and-identity-contract']
+    title, path = _mission_docs()['voice-and-identity-contract']
     return _render_markdown_document(title, path)
 
 
 @root_router.get('/monetization-guardrails', response_class=HTMLResponse, include_in_schema=False)
 async def monetization_guardrails() -> str:
-    title, path = MISSION_DOCS['monetization-guardrails']
+    title, path = _mission_docs()['monetization-guardrails']
     return _render_markdown_document(title, path)
 
 
