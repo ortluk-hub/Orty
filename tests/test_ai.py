@@ -1,14 +1,17 @@
 import asyncio
+import json
 
 import httpx
 
-from service.ai import AIService
+from service.ai import AIService, ChatRequestContext
 from service.config import settings
 
 
 def test_generate_uses_ollama_provider(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
 
     async def fake_ollama(message, history):
         return "ollama-reply"
@@ -29,6 +32,8 @@ def test_generate_uses_ollama_provider(monkeypatch):
 def test_generate_uses_openai_provider_when_explicitly_selected(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
 
     async def fake_openai(message, history):
         return "openai-reply"
@@ -47,12 +52,17 @@ def test_generate_returns_clear_message_for_unsupported_provider(monkeypatch):
 
     result = asyncio.run(service.generate("hello"))
 
-    assert result == "Unsupported LLM_PROVIDER 'anthropic'. Available providers: ollama, openai."
+    assert result == (
+        "Unsupported LLM_PROVIDER 'anthropic'. Available providers: "
+        "ollama, ollama_cloud, openai, vertex_ai."
+    )
 
 
 def test_generate_can_use_registered_custom_provider(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "mock")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
 
     async def fake_mock(message, history):
         return f"mock:{message}:{len(history)}"
@@ -117,8 +127,40 @@ def test_generate_returns_available_tools_for_unknown_tool(monkeypatch):
 
     assert result == (
         "Tool 'missing' is not available. Available tools: "
-        "echo, fs_list, fs_pwd, fs_read, gh_file, gh_repo, gh_tree, utc_time."
+        "bots_overview, clients_overview, codey_overview, echo, fs_list, fs_pwd, fs_read, "
+        "gh_file, gh_repo, gh_tree, memory_overview, smart_home, system_overview, utc_time, web_search."
     )
+
+
+def test_build_system_prompt_grounds_orty_as_server_identity():
+    service = AIService()
+
+    prompt = service._build_system_prompt(
+        ChatRequestContext(channel="orty_web_ui", requested_client_name="orty-web-ui")
+    )
+
+    assert "You are Orty, the server system and coordination layer" in prompt
+    assert "Treat the active language model as one of your faculties" in prompt
+    assert "This is the Orty web UI." in prompt
+    assert "/tool system_overview" in prompt
+
+
+def test_build_system_prompt_can_include_client_contract():
+    service = AIService()
+
+    prompt = service._build_system_prompt(
+        ChatRequestContext(
+            channel="api",
+            requested_client_name="alfred-android",
+            assistant_name="Jane",
+            personality_preset="friendly",
+            client_system_prompt="Always answer outwardly as Jane for Alfred Android.",
+        )
+    )
+
+    assert "This request came through a managed client." in prompt
+    assert "Presented assistant name for this client: Jane." in prompt
+    assert "Always answer outwardly as Jane for Alfred Android." in prompt
 
 
 def test_generate_executes_fs_pwd_tool(monkeypatch):
@@ -128,6 +170,109 @@ def test_generate_executes_fs_pwd_tool(monkeypatch):
     result = asyncio.run(service.generate("/tool fs_pwd"))
 
     assert result
+
+
+def test_generate_reports_when_smart_home_not_configured(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "SMART_HOME_PROVIDER", "")
+    monkeypatch.setattr(settings, "SMARTTHINGS_PAT", None)
+    monkeypatch.setattr(settings, "SMARTTHINGS_DEVICE_MAP", "{}")
+
+    result = asyncio.run(service.generate("/tool smart_home turn off the living room lights"))
+
+    assert "Smart-home control unavailable" in result
+    assert "SMART_HOME_PROVIDER=smartthings" in result
+
+
+def test_generate_executes_smart_home_tool_with_smartthings(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "SMART_HOME_PROVIDER", "smartthings")
+    monkeypatch.setattr(settings, "SMARTTHINGS_PAT", "test-pat")
+    monkeypatch.setattr(
+        settings,
+        "SMARTTHINGS_DEVICE_MAP",
+        json.dumps(
+            {
+                "living room lights": {
+                    "device_id": "device-123",
+                    "kind": "switch",
+                    "aliases": ["living room light", "lights"],
+                }
+            }
+        ),
+    )
+
+    async def fake_send(self, device_id, payload):
+        assert device_id == "device-123"
+        assert payload == {
+            "commands": [
+                {
+                    "component": "main",
+                    "capability": "switch",
+                    "command": "off",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(AIService, "_smartthings_send_command", fake_send)
+
+    result = asyncio.run(service.generate("/tool smart_home turn off the living room lights"))
+
+    assert result == "I turned off living room lights."
+
+
+def test_generate_executes_group_smart_home_tool_with_smartthings(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "SMART_HOME_PROVIDER", "smartthings")
+    monkeypatch.setattr(settings, "SMARTTHINGS_PAT", "test-pat")
+    monkeypatch.setattr(
+        settings,
+        "SMARTTHINGS_DEVICE_MAP",
+        json.dumps(
+            {
+                "paul": {
+                    "device_id": "device-1",
+                    "kind": "dimmer",
+                    "aliases": ["paul", "master bedroom light"],
+                },
+                "lisa": {
+                    "device_id": "device-2",
+                    "kind": "dimmer",
+                    "aliases": ["lisa", "master bedroom light"],
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        settings,
+        "SMARTTHINGS_GROUP_MAP",
+        json.dumps(
+            {
+                "master bedroom lights": {
+                    "members": ["paul", "lisa"],
+                    "aliases": ["master bedroom lights", "master bedroom light"],
+                }
+            }
+        ),
+    )
+
+    sent_commands: list[tuple[str, dict]] = []
+
+    async def fake_send(self, device_id, payload):
+        sent_commands.append((device_id, payload))
+
+    monkeypatch.setattr(AIService, "_smartthings_send_command", fake_send)
+
+    result = asyncio.run(service.generate("/tool smart_home turn off the master bedroom light"))
+
+    assert sent_commands == [
+        ("device-1", {"commands": [{"component": "main", "capability": "switch", "command": "off"}]}),
+        ("device-2", {"commands": [{"component": "main", "capability": "switch", "command": "off"}]}),
+    ]
+    assert result == "I turned off paul and lisa."
 
 
 def test_generate_executes_fs_list_tool(tmp_path, monkeypatch):
@@ -187,6 +332,8 @@ def test_generate_returns_recoverable_message_when_ollama_is_unreachable(monkeyp
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
     monkeypatch.setattr(settings, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
 
     async def fake_post(self, *args, **kwargs):
         raise httpx.ConnectError(
@@ -216,6 +363,26 @@ def test_generate_can_fallback_to_openai_when_ollama_fails(monkeypatch):
 
     service.register_provider("ollama", fake_ollama)
     service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate("hello"))
+
+    assert result == "cloud-reply"
+
+
+def test_generate_can_fallback_to_ollama_cloud_when_local_ollama_fails(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", True)
+    monkeypatch.setattr(settings, "CLOUD_FALLBACK_PROVIDER", "ollama_cloud")
+
+    async def fake_ollama(message, history):
+        return "Ollama error: local model overloaded"
+
+    async def fake_ollama_cloud(message, history):
+        return "cloud-reply"
+
+    service.register_provider("ollama", fake_ollama)
+    service.register_provider("ollama_cloud", fake_ollama_cloud)
 
     result = asyncio.run(service.generate("hello"))
 
@@ -261,6 +428,57 @@ def test_generate_reports_when_primary_and_fallback_both_fail(monkeypatch):
 
     assert "Ollama error: overloaded" in result
     assert "Cloud fallback (openai) also failed: OpenAI error: rate limit" in result
+
+
+def test_generate_parallel_race_prefers_fastest_success(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", True)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", True)
+    monkeypatch.setattr(settings, "CLOUD_FALLBACK_PROVIDER", "openai")
+
+    async def fake_ollama(message, history):
+        await asyncio.sleep(0.05)
+        return "local-reply"
+
+    async def fake_openai(message, history):
+        await asyncio.sleep(0.01)
+        return "cloud-reply"
+
+    service.register_provider("ollama", fake_ollama)
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate_with_meta("hello"))
+
+    assert result["reply"] == "cloud-reply"
+    assert result["provider"] == "openai"
+    assert result["fallback_used"] is True
+    assert result["handled_by"] == "cloud-fallback"
+
+
+def test_generate_parallel_race_ignores_fast_error_and_uses_slower_success(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", True)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", True)
+    monkeypatch.setattr(settings, "CLOUD_FALLBACK_PROVIDER", "openai")
+
+    async def fake_ollama(message, history):
+        await asyncio.sleep(0.01)
+        return "Ollama error: overloaded"
+
+    async def fake_openai(message, history):
+        await asyncio.sleep(0.05)
+        return "cloud-reply"
+
+    service.register_provider("ollama", fake_ollama)
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(service.generate_with_meta("hello"))
+
+    assert result["reply"] == "cloud-reply"
+    assert result["provider"] == "openai"
+    assert result["fallback_used"] is True
 
 
 def test_generate_executes_gh_repo_tool(monkeypatch):

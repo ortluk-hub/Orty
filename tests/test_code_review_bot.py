@@ -20,13 +20,12 @@ class StubEventWriter:
 def test_code_review_bot_clones_repository_via_to_thread(monkeypatch):
     captured = {}
 
-    async def fake_to_thread(func, repository_url, branch):
-        captured["func_name"] = func.__name__
+    async def fake_clone_repo_async(repository_url, branch):
         captured["repository_url"] = repository_url
         captured["branch"] = branch
         return tempfile.mkdtemp(prefix="orty-review-test-")
 
-    monkeypatch.setattr(code_review.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(code_review, "_clone_repo_async", fake_clone_repo_async)
 
     writer = StubEventWriter()
 
@@ -41,7 +40,6 @@ def test_code_review_bot_clones_repository_via_to_thread(monkeypatch):
     )
 
     assert captured == {
-        "func_name": "_clone_repo",
         "repository_url": ".",
         "branch": "main",
     }

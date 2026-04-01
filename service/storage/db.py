@@ -1,17 +1,124 @@
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Iterator
 
 from service.config import settings
 
 
 def utc_now_iso() -> str:
-    from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).isoformat()
 
 
-class SQLiteDB:
+def _safe_add_column(conn: sqlite3.Connection, table: str, column_sql: str) -> None:
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+
+
+class ResultRow(dict):
+    def __init__(self, payload: dict[str, Any]):
+        super().__init__(payload)
+        self._keys = tuple(payload.keys())
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return super().__getitem__(self._keys[key])
+        return super().__getitem__(key)
+
+
+class QueryResult:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    @property
+    def rowcount(self) -> int:
+        return getattr(self._cursor, "rowcount", -1)
+
+    def fetchone(self) -> ResultRow | None:
+        row = self._cursor.fetchone()
+        return self._coerce_row(row)
+
+    def fetchall(self) -> list[ResultRow]:
+        rows = self._cursor.fetchall()
+        return [coerced for row in rows if (coerced := self._coerce_row(row)) is not None]
+
+    def _coerce_row(self, row) -> ResultRow | None:
+        if row is None:
+            return None
+        if isinstance(row, ResultRow):
+            return row
+        if isinstance(row, sqlite3.Row):
+            return ResultRow({key: row[key] for key in row.keys()})
+        if isinstance(row, dict):
+            return ResultRow(dict(row))
+
+        description = getattr(self._cursor, "description", None) or []
+        keys: list[str] = []
+        for column in description:
+            if isinstance(column, (tuple, list)):
+                keys.append(str(column[0]))
+            else:
+                keys.append(str(getattr(column, "name")))
+        if keys:
+            return ResultRow({key: value for key, value in zip(keys, row)})
+        return ResultRow({f"col_{index}": value for index, value in enumerate(row)})
+
+
+class DatabaseConnection:
+    def execute(self, query: str, params: tuple | list | None = None) -> QueryResult:
+        raise NotImplementedError
+
+
+class Database:
+    kind = "unknown"
+    db_path: str | None = None
+    database_url: str | None = None
+
+    @contextmanager
+    def connect(self) -> Iterator[DatabaseConnection]:
+        raise NotImplementedError
+
+
+class SQLiteConnection(DatabaseConnection):
+    def __init__(self, raw_connection: sqlite3.Connection):
+        self._raw_connection = raw_connection
+
+    def execute(self, query: str, params: tuple | list | None = None) -> QueryResult:
+        cursor = self._raw_connection.execute(query, tuple(params or ()))
+        return QueryResult(cursor)
+
+
+class PostgresConnection(DatabaseConnection):
+    def __init__(self, raw_connection):
+        self._raw_connection = raw_connection
+
+    def execute(self, query: str, params: tuple | list | None = None) -> QueryResult:
+        cursor = self._raw_connection.cursor()
+        cursor.execute(_translate_qmark_params(query), tuple(params or ()))
+        return QueryResult(cursor)
+
+
+def _translate_qmark_params(query: str) -> str:
+    return query.replace("?", "%s")
+
+
+def _load_psycopg():
+    try:
+        import psycopg  # type: ignore
+    except ImportError as exc:  # pragma: no cover - exercised only on Postgres path
+        raise RuntimeError(
+            "psycopg is required for PostgreSQL runtime. Install requirements.txt or unset DATABASE_URL."
+        ) from exc
+    return psycopg
+
+
+class SQLiteDB(Database):
+    kind = "sqlite"
+
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or settings.SQLITE_PATH
         self.timeout_seconds = settings.SQLITE_TIMEOUT_SECONDS
@@ -25,10 +132,10 @@ class SQLiteDB:
         return conn
 
     @contextmanager
-    def connect(self):
+    def connect(self) -> Iterator[DatabaseConnection]:
         conn = self._open_connection()
         try:
-            yield conn
+            yield SQLiteConnection(conn)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -38,7 +145,8 @@ class SQLiteDB:
 
     def initialize(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as conn:
+        conn = self._open_connection()
+        try:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS messages (
@@ -85,10 +193,41 @@ class SQLiteDB:
                 row["name"] for row in conn.execute("PRAGMA table_info(clients)").fetchall()
             }
             if "preferences_json" not in client_columns:
-                conn.execute("ALTER TABLE clients ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'")
+                _safe_add_column(conn, "clients", "preferences_json TEXT NOT NULL DEFAULT '{}'")
             if "is_primary" not in client_columns:
-                conn.execute("ALTER TABLE clients ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0")
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_is_primary ON clients(is_primary) WHERE is_primary = 1")
+                _safe_add_column(conn, "clients", "is_primary INTEGER NOT NULL DEFAULT 0")
+            if "is_admin" not in client_columns:
+                _safe_add_column(conn, "clients", "is_admin INTEGER NOT NULL DEFAULT 0")
+            if "access_tier" not in client_columns:
+                _safe_add_column(conn, "clients", "access_tier TEXT NOT NULL DEFAULT 'free'")
+            if "lifecycle_status" not in client_columns:
+                _safe_add_column(conn, "clients", "lifecycle_status TEXT NOT NULL DEFAULT 'active'")
+            if "revoked_at" not in client_columns:
+                _safe_add_column(conn, "clients", "revoked_at TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_is_primary ON clients(is_primary) WHERE is_primary = 1"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS client_promotion_requests (
+                    request_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    reviewer_client_id TEXT,
+                    rejection_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    reviewed_at TEXT,
+                    FOREIGN KEY(client_id) REFERENCES clients(client_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_promotion_requests_status ON client_promotion_requests (status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_promotion_requests_client_id ON client_promotion_requests (client_id)"
+            )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS client_access_tokens (
@@ -205,6 +344,47 @@ class SQLiteDB:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS bug_reports (
+                    report_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    client TEXT,
+                    source TEXT,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    details TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    source_created_at INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(client_id) REFERENCES clients(client_id)
+                )
+                """
+            )
+            bug_report_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(bug_reports)").fetchall()
+            }
+            if "client" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN client TEXT")
+            if "source" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN source TEXT")
+            if "metadata_json" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+            if "source_created_at" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN source_created_at INTEGER")
+            if "status" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN status TEXT DEFAULT 'pending'")
+            if "codey_task_id" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN codey_task_id TEXT")
+            if "codey_status" not in bug_report_columns:
+                conn.execute("ALTER TABLE bug_reports ADD COLUMN codey_status TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_bug_reports_client_created ON bug_reports (client_id, created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_bug_reports_client_source_created ON bug_reports (client_id, source, created_at DESC)"
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bots (
                     bot_id TEXT PRIMARY KEY,
                     owner_client_id TEXT NOT NULL,
@@ -236,3 +416,57 @@ class SQLiteDB:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_bot_events_bot_id_created_at ON bot_events (bot_id, created_at)"
             )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+class PostgresDB(Database):
+    kind = "postgres"
+
+    def __init__(self, database_url: str | None = None):
+        self.database_url = database_url or settings.DATABASE_URL
+        if not self.database_url:
+            raise ValueError("PostgreSQL runtime requires DATABASE_URL")
+        self.connect_timeout_seconds = settings.DATABASE_CONNECT_TIMEOUT_SECONDS
+        self.initialize()
+
+    def _open_connection(self):
+        psycopg = _load_psycopg()
+        return psycopg.connect(self.database_url, connect_timeout=self.connect_timeout_seconds)
+
+    @contextmanager
+    def connect(self) -> Iterator[DatabaseConnection]:
+        conn = self._open_connection()
+        try:
+            yield PostgresConnection(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def initialize(self) -> None:
+        schema_path = Path(__file__).with_name("postgres_schema_phase1.sql")
+        schema_sql = schema_path.read_text(encoding="utf-8")
+        conn = self._open_connection()
+        try:
+            conn.execute(schema_sql)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def build_database(db_path: str | None = None) -> Database:
+    if db_path is not None:
+        return SQLiteDB(db_path)
+    if settings.DATABASE_URL:
+        return PostgresDB(settings.DATABASE_URL)
+    return SQLiteDB()

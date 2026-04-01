@@ -22,6 +22,11 @@ class ChatRequest(BaseModel):
     history_limit: int = Field(default=10, ge=1, le=50)
     reset_conversation: bool = False
     persist: bool = True
+    client: str | None = Field(default=None, min_length=1, max_length=120)
+    assistant_name: str | None = Field(default=None, min_length=1, max_length=120)
+    personality_preset: str | None = Field(default=None, min_length=1, max_length=80)
+    system_prompt: str | None = Field(default=None, max_length=12000)
+    recent_messages: list[EscalationMessage] = Field(default_factory=list)
     escalation_context: EscalationContext | None = None
 
 
@@ -36,6 +41,34 @@ class ChatResponse(BaseModel):
     summary_id: str | None = None
 
 
+class SpeechRecognizeRequest(BaseModel):
+    audio_base64: str = Field(min_length=1)
+    language_code: str = Field(default="en-US", min_length=2, max_length=32)
+    api_key: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class SpeechRecognizeResponse(BaseModel):
+    transcript: str | None = None
+    no_speech: bool = False
+    provider: str = "google_speech_v1"
+
+
+class SpeechSynthesizeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    language_code: str = Field(default="en-US", min_length=2, max_length=32)
+    api_key: str | None = Field(default=None, min_length=1, max_length=512)
+    voice_name: str | None = Field(default=None, min_length=1, max_length=128)
+    speaking_rate: float = Field(default=1.0, ge=0.25, le=2.0)
+    pitch: float = Field(default=0.0, ge=-20.0, le=20.0)
+    audio_encoding: str = Field(default="MP3", min_length=3, max_length=32)
+
+
+class SpeechSynthesizeResponse(BaseModel):
+    audio_base64: str = Field(min_length=1)
+    audio_encoding: str = "MP3"
+    provider: str = "google_tts_v1"
+
+
 class ClientCreateRequest(BaseModel):
     name: str | None = None
     preferences: dict = Field(default_factory=dict)
@@ -47,6 +80,9 @@ class ClientCreateResponse(BaseModel):
     name: str | None = None
     preferences: dict = Field(default_factory=dict)
     is_primary: bool = False
+    access_tier: Literal["free", "premium", "dedicated", "enterprise"] = "free"
+    lifecycle_status: Literal["active", "stale", "revoked"] = "active"
+    revoked_at: str | None = None
     created_at: str
 
 
@@ -55,6 +91,10 @@ class ClientSummaryResponse(BaseModel):
     name: str | None = None
     preferences: dict = Field(default_factory=dict)
     is_primary: bool = False
+    is_admin: bool = False
+    access_tier: Literal["free", "premium", "dedicated", "enterprise"] = "free"
+    lifecycle_status: Literal["active", "stale", "revoked"] = "active"
+    revoked_at: str | None = None
     created_at: str
     last_seen_at: str | None = None
 
@@ -96,15 +136,61 @@ class ClientRevokeResponse(BaseModel):
     revoked: bool
 
 
+class ClientPromotionRequest(BaseModel):
+    reason: str = Field(
+        min_length=10,
+        max_length=2000,
+        description="Reason for requesting admin status",
+    )
+    admin_secret_hash: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Hash of admin secret",
+    )
+
+
+class ClientPromotionRequestResponse(BaseModel):
+    request_id: str
+    client_id: str
+    reason: str
+    status: str
+    created_at: str
+
+
+class ClientPromotionApproveRequest(BaseModel):
+    request_id: str
+
+
+class ClientPromotionRejectRequest(BaseModel):
+    request_id: str
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="Reason for rejection",
+    )
+
+
+class ClientPromotionListResponse(BaseModel):
+    requests: list[dict]
+    total: int
+
+
 class ClientMeResponse(BaseModel):
     client_id: str
     name: str | None = None
     preferences: dict = Field(default_factory=dict)
     is_primary: bool = False
+    access_tier: Literal["free", "premium", "dedicated", "enterprise"] = "free"
+    lifecycle_status: Literal["active", "stale", "revoked"] = "active"
+    revoked_at: str | None = None
     created_at: str
     last_seen_at: str | None = None
     auth_method: str
     is_admin: bool = False
+
+
+class ClientAccessTierUpdateRequest(BaseModel):
+    access_tier: Literal["free", "premium", "dedicated", "enterprise"]
 
 
 class ClientIntrospectRequest(BaseModel):
@@ -184,6 +270,35 @@ class MemorySyncResponse(BaseModel):
     status: str
     syncedCount: int
     memories: list[MemorySyncItem] = Field(default_factory=list)
+
+
+class BugReportCreateRequest(BaseModel):
+    client: str | None = Field(default=None, min_length=1, max_length=100)
+    client_id: str | None = Field(default=None, min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2000)
+    details: str = Field(min_length=1, max_length=40000)
+    metadata: dict[str, str] = Field(default_factory=dict)
+    createdAt: int
+
+
+class BugReportCreateResponse(BaseModel):
+    status: str
+    report_id: str
+
+
+class BugReportRecordResponse(BaseModel):
+    report_id: str
+    client_id: str
+    client: str | None = None
+    source: str | None = None
+    title: str
+    summary: str
+    details: str
+    metadata: dict[str, str] = Field(default_factory=dict)
+    createdAt: int
+    created_at: str
+    updated_at: str
 
 
 class MemorySummaryCreateRequest(BaseModel):

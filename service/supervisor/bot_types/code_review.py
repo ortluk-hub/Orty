@@ -2,6 +2,7 @@ import asyncio
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from service.memory import MemoryStore
@@ -69,6 +70,12 @@ def _clone_repo(repository_url: str, branch: str | None) -> str:
     return tmp_dir
 
 
+async def _clone_repo_async(repository_url: str, branch: str | None) -> str:
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="orty-code-review-clone") as executor:
+        return await loop.run_in_executor(executor, _clone_repo, repository_url, branch)
+
+
 async def run_code_review_bot(
     bot_id: str,
     owner_client_id: str,
@@ -94,9 +101,7 @@ async def run_code_review_bot(
             payload={"repository_url": repository_url, "branch": branch, "human_review_required": True},
         )
 
-        # Run clone inline inside the bot task to avoid leaking default-executor
-        # worker shutdown time into async test teardown.
-        clone_dir = _clone_repo(repository_url, branch)
+        clone_dir = await _clone_repo_async(repository_url, branch)
         event_writer.emit(
             bot_id=bot_id,
             owner_client_id=owner_client_id,

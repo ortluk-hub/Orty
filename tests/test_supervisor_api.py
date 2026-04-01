@@ -48,6 +48,24 @@ async def test_client_creation_and_token_verification(async_client):
 
 
 @pytest.mark.anyio
+async def test_bot_routes_return_503_when_bot_control_surface_disabled(async_client, monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_BOT_CONTROL_SURFACE", False)
+
+    created_client = await create_client(async_client, 'Cloud Run Client')
+    headers = client_headers(created_client)
+
+    response = await request(
+        async_client,
+        'POST',
+        '/v1/bots',
+        json={'bot_type': 'heartbeat', 'config': {'interval_seconds': 1}},
+        headers=headers,
+    )
+    assert response.status_code == 503
+    assert response.json()['detail'] == 'Bot control surface is disabled for this deployment profile.'
+
+
+@pytest.mark.anyio
 async def test_bot_lifecycle_start_heartbeat_stop_and_events(async_client):
     created_client = await create_client(async_client, 'Bot Owner')
     headers = client_headers(created_client)

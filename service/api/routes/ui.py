@@ -1,16 +1,234 @@
-from fastapi import APIRouter, Request
+from html import escape
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from service.ai import ChatRequestContext
 from service.api.deps import ensure_primary_client, get_runtime
+from service.config import settings
 from service.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix='/ui', tags=['ui'], redirect_slashes=False)
 root_router = APIRouter(tags=['ui'])
 
 
+def _candidate_alfred_roots() -> list[Path]:
+    configured = settings.ALFRED_DOCS_ROOT
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+
+    service_root = Path(__file__).resolve().parents[3]
+    cwd = Path.cwd()
+    candidates.extend(
+        [
+            cwd / 'Alfred' / 'Alfred',
+            cwd.parent / 'Alfred' / 'Alfred',
+            service_root.parent / 'Alfred' / 'Alfred',
+            Path('/home/ortluk/ortluk-hub/Alfred/Alfred'),
+        ]
+    )
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        normalized = candidate.resolve(strict=False)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _resolve_alfred_root() -> Path:
+    for candidate in _candidate_alfred_roots():
+        if candidate.exists():
+            return candidate
+    configured = settings.ALFRED_DOCS_ROOT
+    if configured:
+        return Path(configured).expanduser()
+    return _candidate_alfred_roots()[0]
+
+
+def _mission_docs() -> dict[str, tuple[str, Path]]:
+    alfred_root = _resolve_alfred_root()
+    return {
+        'jane-charter': ('Jane Charter', alfred_root / 'JANE_CHARTER.md'),
+        'voice-and-identity-contract': (
+            'Voice And Identity Contract',
+            alfred_root / 'VOICE_AND_IDENTITY_CONTRACT.md',
+        ),
+        'monetization-guardrails': (
+            'Monetization Guardrails',
+            alfred_root / 'MONETIZATION_GUARDRAILS.md',
+        ),
+    }
+
+
+def _render_markdown_document(title: str, path: Path) -> str:
+    if not path.exists():
+        raise HTTPException(status_code=404, detail='Document not found')
+
+    content = escape(path.read_text(encoding='utf-8'))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{escape(title)}</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; color: #18212d; }}
+    .wrap {{ max-width: 900px; margin: 0 auto; padding: 32px 20px 56px; }}
+    h1 {{ color: #0f1722; margin: 0 0 16px; }}
+    p {{ line-height: 1.6; }}
+    pre {{
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 18px;
+      border-radius: 14px;
+      border: 1px solid #d7dfeb;
+      background: #ffffff;
+      color: #18212d;
+      line-height: 1.6;
+      overflow-x: auto;
+    }}
+    a {{ color: #0d5ea8; }}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <p><a href="/homepage">Back to homepage</a></p>
+    <h1>{escape(title)}</h1>
+    <pre>{content}</pre>
+  </main>
+</body>
+</html>
+"""
+
+
 @root_router.get('/', include_in_schema=False)
 async def root_to_ui() -> RedirectResponse:
     return RedirectResponse(url='/ui', status_code=307)
+
+
+@root_router.get('/homepage', response_class=HTMLResponse, include_in_schema=False)
+async def homepage() -> str:
+    return """<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>Alfred + Orty</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #0f1722; color: #ebf1f6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { margin: 0 0 8px; font-size: 2rem; }
+    p { line-height: 1.6; color: #c2ccd8; }
+    .card { margin-top: 20px; padding: 18px; border-radius: 14px; background: #162131; border: 1px solid #243348; }
+    a { color: #8dd0ff; }
+  </style>
+</head>
+<body>
+  <main class=\"wrap\">
+    <h1>Alfred + Orty</h1>
+    <p>
+      Alfred is a personal assistant app backed by Orty for private chat, voice, automations,
+      and task execution. This site exists to support Alfred's OAuth-based integrations.
+    </p>
+    <section class=\"card\">
+      <strong>Integration scope</strong>
+      <p>
+        Alfred connects to user-approved services only to deliver assistant features the user asks for,
+        including messaging, reminders, home automation, speech, and conversational responses.
+      </p>
+    </section>
+    <section class=\"card\">
+      <strong>Policy links</strong>
+      <p><a href=\"/privacy-policy\">Privacy Policy</a></p>
+      <p><a href=\"/jane-charter\">Jane Charter</a></p>
+      <p><a href=\"/voice-and-identity-contract\">Voice And Identity Contract</a></p>
+      <p><a href=\"/monetization-guardrails\">Monetization Guardrails</a></p>
+      <p><a href=\"/ui\">Orty Web UI</a></p>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
+@root_router.get('/jane-charter', response_class=HTMLResponse, include_in_schema=False)
+async def jane_charter() -> str:
+    title, path = _mission_docs()['jane-charter']
+    return _render_markdown_document(title, path)
+
+
+@root_router.get('/voice-and-identity-contract', response_class=HTMLResponse, include_in_schema=False)
+async def voice_and_identity_contract() -> str:
+    title, path = _mission_docs()['voice-and-identity-contract']
+    return _render_markdown_document(title, path)
+
+
+@root_router.get('/monetization-guardrails', response_class=HTMLResponse, include_in_schema=False)
+async def monetization_guardrails() -> str:
+    title, path = _mission_docs()['monetization-guardrails']
+    return _render_markdown_document(title, path)
+
+
+@root_router.get('/privacy-policy', response_class=HTMLResponse, include_in_schema=False)
+async def privacy_policy() -> str:
+    return """<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>Alfred Privacy Policy</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; color: #18212d; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1, h2 { color: #0f1722; }
+    p, li { line-height: 1.65; }
+  </style>
+</head>
+<body>
+  <main class=\"wrap\">
+    <h1>Privacy Policy</h1>
+    <p>Effective date: March 20, 2026</p>
+    <p>
+      Alfred and Orty process user-provided text, voice, and connected-service data only to provide
+      assistant features requested by the user.
+    </p>
+    <h2>What data may be processed</h2>
+    <ul>
+      <li>Messages, prompts, and assistant replies.</li>
+      <li>Voice audio and speech transcripts used for speech recognition and speech synthesis.</li>
+      <li>Connected-service metadata needed for requested integrations such as home automation.</li>
+      <li>Configuration details the user provides, such as assistant preferences and saved places.</li>
+    </ul>
+    <h2>How data is used</h2>
+    <ul>
+      <li>To respond to user requests and execute requested actions.</li>
+      <li>To provide connected features such as reminders, home automation, and voice interaction.</li>
+      <li>To improve reliability, debug failures, and maintain service operation.</li>
+    </ul>
+    <h2>Sharing</h2>
+    <p>
+      Data is shared only with the service providers required to fulfill user-requested features,
+      such as speech, language, or home automation providers configured by the user.
+    </p>
+    <h2>Retention and control</h2>
+    <p>
+      Users control their connected accounts and can revoke access by removing integrations or
+      deleting locally stored settings and credentials.
+    </p>
+    <h2>Contact</h2>
+    <p>
+      For questions about Alfred or Orty privacy handling, contact the operator of the deployed service.
+    </p>
+  </main>
+</body>
+</html>
+"""
 
 
 @router.post('/chat', response_model=ChatResponse)
@@ -25,7 +243,24 @@ async def ui_chat(payload: ChatRequest, request: Request):
         limit=payload.history_limit,
         client_id=primary['client_id'],
     )
-    reply = await runtime.ai_service.generate(payload.message, history=history)
+    effective_history = [
+        *history,
+        *[{"role": msg.role, "content": msg.content} for msg in payload.recent_messages],
+    ]
+    reply = await runtime.ai_service.generate(
+        payload.message,
+        history=effective_history,
+        request_context=ChatRequestContext(
+            channel="orty_web_ui",
+            conversation_id=conversation_id,
+            auth_method="primary-ui",
+            current_client=primary,
+            requested_client_name="orty-web-ui",
+            assistant_name="Orty",
+            personality_preset=payload.personality_preset,
+            client_system_prompt=payload.system_prompt,
+        ),
+    )
 
     if payload.persist:
         runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=primary['client_id'])
