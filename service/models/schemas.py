@@ -74,6 +74,12 @@ class ClientCreateRequest(BaseModel):
     preferences: dict = Field(default_factory=dict)
 
 
+class ClientRegisterRequest(BaseModel):
+    client_key: str = Field(min_length=1, max_length=200)
+    name: str | None = None
+    preferences: dict = Field(default_factory=dict)
+
+
 class ClientCreateResponse(BaseModel):
     client_id: str
     client_token: str

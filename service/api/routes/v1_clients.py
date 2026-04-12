@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from service.api.deps import ensure_primary_client, get_request_auth, get_runtime
+from service.config import settings
 from service.models.schemas import (
     ClientAccessTierUpdateRequest,
     ClientCreateRequest,
+    ClientRegisterRequest,
     ClientCreateResponse,
     ClientPreferencesUpdateRequest,
     ClientPromotionApproveRequest,
@@ -21,6 +23,17 @@ router = APIRouter(prefix='/v1/clients', tags=['v1-clients'])
 @router.post('', response_model=ClientCreateResponse)
 async def create_client(payload: ClientCreateRequest, request: Request, _: str = Depends(verify_secret)):
     return get_runtime(request).clients_repo.create_client(name=payload.name, preferences=payload.preferences)
+
+
+@router.post('/register', response_model=ClientCreateResponse)
+async def register_alfred_client(payload: ClientRegisterRequest, request: Request):
+    configured_client_key = (settings.ORTY_ALFRED_CLIENT_KEY or '').strip()
+    if not configured_client_key:
+        raise HTTPException(status_code=503, detail='Alfred client registration is not configured')
+    if payload.client_key.strip() != configured_client_key:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+    name = payload.name or 'Alfred Client'
+    return get_runtime(request).clients_repo.register_alfred_client(name=name, preferences=payload.preferences)
 
 
 @router.get('', response_model=list[ClientSummaryResponse])

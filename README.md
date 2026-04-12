@@ -7,18 +7,18 @@ Orty is a modular, on-device AI assistant built with FastAPI and designed for cl
 ## Status
 
 Version: v0.1.0-alpha
-Current Phase: Alfred memory sync + runtime isolation hardening
-Next Phase: Alfred integration hardening
+Current Phase: deployment cleanup + Cloud Run durability prep
+Next Phase: PostgreSQL-backed beta cutover
 
 ---
 
 ## Current Roadmap Position
 
-Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in tools + SQLite memory** phase.
+Orty is currently in **v0.1.0-alpha** and in the **deployment cleanup + durable beta cutover** phase.
 
 ### What is already in place
 - FastAPI application structure and running server entrypoint
-- Health endpoint and request authentication via registered clients (with shared-secret admin fallback)
+- Health endpoint, Alfred client registration, and request authentication via registered clients (with shared-secret admin fallback)
 - Client auth lifecycle APIs (`/v1/auth/token`, `/v1/auth/rotate`, `/v1/auth/revoke`, `/v1/auth/me`, `/v1/auth/introspect`)
 - Chat endpoint with OpenAI/Ollama provider routing, escalation envelope support, and response handoff metadata
 - Built-in tool execution (`echo`, `utc_time`, and filesystem helper tools)
@@ -32,8 +32,20 @@ Orty is currently in **v0.1.0-alpha** and in the **LLM abstraction + built-in to
 - Request-scoped runtime dependency wiring so API routes, UI routes, and supervisor services share the active app runtime instead of module-level singletons
 - Test runtime isolation for SQLite-backed APIs and supervisor flows, including safer async cleanup for bot tasks
 
+### Deployment Readiness Markers
+
+The deployment path is now tracked with explicit markers in [docs/DEPLOYMENT_ROADMAP.md](docs/DEPLOYMENT_ROADMAP.md):
+
+- D0 Repo cleanup and deployment story alignment
+- D1 PostgreSQL-backed Cloud Run beta cutover
+- D2 Artifact-first beta release discipline
+
+Current marker: D1 in progress
+
+Google Cloud operator setup for the beta lane lives in [docs/GCP_BETA_SETUP.md](docs/GCP_BETA_SETUP.md).
+
 ### What comes next
-The next planned milestone is **broader Alfred wiring and production hardening**.
+The next planned milestone is **D1: PostgreSQL-backed Cloud Run beta cutover**.
 
 ### Integration Contract
 - Alfred-Orty integration contract (auth, escalation, and memory roadmap): `docs/alfred-orty-integration-contract-v1.md`
@@ -44,7 +56,13 @@ The next planned milestone is **broader Alfred wiring and production hardening**
 - Orty now includes a **simple built-in web UI** for quick manual testing.
 - Open `GET /ui` in a browser to chat as the primary root client without manually setting secrets, and continue conversations via `conversation_id`.
 - The backend remains API-first (`/chat`, `/health`, and `/v1/...` endpoints), with the web UI acting as a lightweight test client.
-- Creating additional registered clients via `POST /v1/clients` requires the admin shared secret (`x-orty-secret`).
+- Creating Alfred clients via `POST /v1/clients/register` uses the configured Alfred client key, while creating additional admin clients via `POST /v1/clients` requires the admin shared secret (`x-orty-secret`).
+
+### Deployment Shape
+
+The intended production artifact for server-hosted Orty is a versioned container image built from the official source repo and deployed with environment-specific config and secrets injected at runtime.
+
+Cloud Run beta target: `LLM_PROVIDER=vertex_ai` with no local Ollama dependency inside the container. PostgreSQL should be provided through `DATABASE_URL`, not SQLite on ephemeral disk.
 
 ---
 
@@ -216,9 +234,40 @@ uvicorn service.api:app --host 0.0.0.0 --port 8080
 
 Health check endpoint:
 
-```
+```text
 GET /health
 ```
+
+For local Alfred full-stack testing, you can run Orty and a fresh Cloudflare tunnel together with:
+
+```bash
+./scripts/start_local_stack.sh --sync-alfred
+```
+
+That script:
+- starts Orty on `127.0.0.1:8081`
+- starts a fresh `trycloudflare.com` tunnel
+- prints the local health URL, homepage URL, and current tunnel URL
+- prints a same-LAN URL when one is available
+- updates Alfred's [`local.properties`](/home/ortluk/ortluk-hub/Alfred/Alfred/local.properties) `orty.base.url` and `orty.lan.base.url` when `--sync-alfred` is passed
+- stores logs under `/tmp/orty-local-stack/`
+
+To stop the local stack:
+
+```bash
+./scripts/stop_local_stack.sh
+```
+
+## Cloud Run Phase 1
+
+Orty now has a deployment profile intended for the first Cloud Run cutover of the interactive Alfred path.
+
+- Set `ORTY_DEPLOYMENT_PROFILE=cloud_run_interactive` to disable the in-process `/v1/bots` control surface.
+- Use this profile for the public chat/auth/STT/TTS path only.
+- Keep Codey and supervisor-style bot orchestration on separate infrastructure for now.
+- This phase does **not** solve durable storage yet. `SQLITE_PATH` still points to SQLite, so a plain Cloud Run deploy should be treated as staging or smoke infrastructure until storage is migrated off the container filesystem.
+
+See `docs/cloud-run-phase1.md` for the rollout order and `scripts/deploy_cloud_run_phase1.sh` for a starting deploy command.
 
 Expected response:
 

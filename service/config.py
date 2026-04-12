@@ -15,6 +15,7 @@ class Settings:
     def __init__(self) -> None:
         self.ORTY_SHARED_SECRET: str = os.getenv("ORTY_SHARED_SECRET", "dev-secret")
         self.ORTY_UI_ADMIN_SECRET: str | None = (os.getenv("ORTY_UI_ADMIN_SECRET") or "").strip() or None
+        self.ORTY_ALFRED_CLIENT_KEY: str | None = (os.getenv('ORTY_ALFRED_CLIENT_KEY') or '').strip() or None
         self.ORTY_DEPLOYMENT_PROFILE: str = os.getenv("ORTY_DEPLOYMENT_PROFILE", "default").strip().lower()
 
         default_llm_provider = "vertex_ai" if self.ORTY_DEPLOYMENT_PROFILE == "cloud_run_interactive" else "ollama"
