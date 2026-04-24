@@ -421,6 +421,56 @@ def test_ui_chat_uses_admin_authenticated_session(monkeypatch):
     assert captured["request_context"].current_client["is_admin"] is True
 
 
+def test_chat_passes_rich_tool_contract_and_returns_tool_calls(monkeypatch):
+    _force_serial_openai(monkeypatch)
+    runtime = app.state.runtime
+    captured: dict = {}
+
+    async def fake_generate_with_meta(message, history=None, request_context=None):
+        captured["message"] = message
+        captured["request_context"] = request_context
+        return {
+            "reply": "",
+            "provider": "openai",
+            "handled_by": "cloud-primary",
+            "fallback_used": False,
+            "fallback_provider": None,
+            "tool_calls": [
+                {
+                    "name": "alfred.navigate_to",
+                    "arguments": {"destination": "home"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(runtime.ai_service, "generate_with_meta", fake_generate_with_meta)
+
+    response = request(
+        "POST",
+        "/chat",
+        json={
+            "message": "Take me home.",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "alfred.navigate_to"},
+                }
+            ],
+            "tool_choice": "auto",
+        },
+        headers={"x-orty-secret": settings.ORTY_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tool_calls"] == [
+        {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
+    assert captured["message"] == "Take me home."
+    assert captured["request_context"].tools[0]["function"]["name"] == "alfred.navigate_to"
+    assert captured["request_context"].tool_choice == "auto"
+
+
 def test_chat_returns_generation_metadata(monkeypatch):
     _force_serial_openai(monkeypatch)
 

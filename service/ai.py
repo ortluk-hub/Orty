@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 import re
 import time
-from typing import TypedDict
+from typing import Any, NotRequired, TypedDict
 
 import httpx
 
@@ -85,6 +85,7 @@ class GenerationResult(TypedDict):
     handled_by: str
     fallback_used: bool
     fallback_provider: str | None
+    tool_calls: NotRequired[list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,8 @@ class ChatRequestContext:
     assistant_name: str | None = None
     personality_preset: str | None = None
     client_system_prompt: str | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: Any | None = None
 
 
 class AIService:
@@ -169,6 +172,13 @@ class AIService:
 
         tool_result = await self._maybe_execute_tool(message, request_context=request_context)
         if tool_result is not None:
+            result = {
+                "reply": tool_result,
+                "provider": "tool",
+                "handled_by": "tool",
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider="tool",
@@ -176,17 +186,18 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": tool_result,
-                "provider": "tool",
-                "handled_by": "tool",
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(result, request_context=request_context)
 
         generator = self._providers.get(provider)
         if generator is None:
             available = ", ".join(sorted(self._providers.keys()))
+            result = {
+                "reply": f"Unsupported LLM_PROVIDER '{provider}'. Available providers: {available}.",
+                "provider": provider,
+                "handled_by": "unsupported-provider",
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -194,13 +205,7 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": f"Unsupported LLM_PROVIDER '{provider}'. Available providers: {available}.",
-                "provider": provider,
-                "handled_by": "unsupported-provider",
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(result, request_context=request_context)
 
         fallback_provider = settings.CLOUD_FALLBACK_PROVIDER.lower()
         fallback_generator = self._providers.get(fallback_provider) if fallback_provider else None
@@ -212,6 +217,7 @@ class AIService:
             message=message,
             history=history,
             system_prompt=system_prompt,
+            request_context=request_context,
         )
         if race_result is not None:
             self._log_generation_summary(
@@ -221,7 +227,7 @@ class AIService:
                 fallback_used=race_result["fallback_used"],
                 request_start=request_start,
             )
-            return race_result
+            return self._finalize_generation_result(race_result, request_context=request_context)
 
         primary_reply, _ = await self._timed_provider_call(
             provider=provider,
@@ -229,9 +235,17 @@ class AIService:
             message=message,
             history=history,
             system_prompt=system_prompt,
+            request_context=request_context,
             phase="primary",
         )
         if not self._should_attempt_cloud_fallback(provider, primary_reply):
+            result = {
+                "reply": primary_reply,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -239,15 +253,16 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": primary_reply,
-                "provider": provider,
-                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(result, request_context=request_context)
 
         if fallback_generator is None:
+            result = {
+                "reply": primary_reply,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -255,13 +270,7 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": primary_reply,
-                "provider": provider,
-                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(result, request_context=request_context)
 
         fallback_reply, _ = await self._timed_provider_call(
             provider=fallback_provider,
@@ -269,6 +278,7 @@ class AIService:
             message=message,
             history=history,
             system_prompt=system_prompt,
+            request_context=request_context,
             phase="fallback",
         )
         if self._is_provider_error(fallback_provider, fallback_reply):
@@ -277,6 +287,13 @@ class AIService:
                 + "\n\n"
                 + f"Cloud fallback ({fallback_provider}) also failed: {fallback_reply}"
             )
+            result = {
+                "reply": reply_message,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": fallback_provider,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -284,13 +301,14 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": reply_message,
-                "provider": provider,
-                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
-                "fallback_used": False,
-                "fallback_provider": fallback_provider,
-            }
+            return self._finalize_generation_result(result, request_context=request_context)
+        result = {
+            "reply": fallback_reply,
+            "provider": fallback_provider,
+            "handled_by": self._handled_by_for_provider(fallback_provider, fallback_used=True),
+            "fallback_used": True,
+            "fallback_provider": fallback_provider,
+        }
         self._log_generation_summary(
             message=message,
             provider=fallback_provider,
@@ -298,13 +316,7 @@ class AIService:
             fallback_used=True,
             request_start=request_start,
         )
-        return {
-            "reply": fallback_reply,
-            "provider": fallback_provider,
-            "handled_by": self._handled_by_for_provider(fallback_provider, fallback_used=True),
-            "fallback_used": True,
-            "fallback_provider": fallback_provider,
-        }
+        return self._finalize_generation_result(result, request_context=request_context)
 
     async def _maybe_generate_with_race(
         self,
@@ -316,6 +328,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str,
+        request_context: ChatRequestContext | None,
     ) -> GenerationResult | None:
         if not settings.ENABLE_PARALLEL_PROVIDER_RACE:
             return None
@@ -342,6 +355,7 @@ class AIService:
                 message=message,
                 history=history,
                 system_prompt=system_prompt,
+                request_context=request_context,
                 phase="race_primary",
             )
         )
@@ -352,6 +366,7 @@ class AIService:
                 message=message,
                 history=history,
                 system_prompt=system_prompt,
+                request_context=request_context,
                 phase="race_fallback",
             )
         )
@@ -465,6 +480,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str,
+        request_context: ChatRequestContext | None,
         phase: str,
     ) -> tuple[str, int]:
         start = time.perf_counter()
@@ -481,6 +497,7 @@ class AIService:
                 message=message,
                 history=history,
                 system_prompt=system_prompt,
+                request_context=request_context,
             )
         except Exception:
             logger.exception(
@@ -508,11 +525,20 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str,
+        request_context: ChatRequestContext | None,
     ) -> str:
         try:
-            return await generator(message, history, system_prompt)
+            return await generator(
+                message,
+                history,
+                system_prompt,
+                request_context=request_context,
+            )
         except TypeError:
-            return await generator(message, history)
+            try:
+                return await generator(message, history, system_prompt)
+            except TypeError:
+                return await generator(message, history)
 
     def _log_generation_summary(
         self,
@@ -531,6 +557,138 @@ class AIService:
             self._elapsed_ms(request_start),
             len(message),
         )
+
+    def _finalize_generation_result(
+        self,
+        result: GenerationResult,
+        *,
+        request_context: ChatRequestContext | None = None,
+    ) -> GenerationResult:
+        reply, tool_calls = self._extract_structured_reply(
+            result["reply"],
+            request_context=request_context,
+        )
+        finalized = dict(result)
+        finalized["reply"] = reply
+        finalized["tool_calls"] = tool_calls
+        return finalized
+
+    def _extract_structured_reply(
+        self,
+        reply: str,
+        *,
+        request_context: ChatRequestContext | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        del request_context
+        parsed = self._parse_tool_payload(reply)
+        if parsed is None:
+            return reply, []
+
+        tool_calls = self._normalize_tool_calls(parsed.get("tool_calls"))
+        if not tool_calls:
+            tool_calls = self._normalize_tool_calls(parsed.get("toolCalls"))
+        if not tool_calls and "name" in parsed and "arguments" in parsed:
+            normalized = self._normalize_tool_call(parsed)
+            tool_calls = [normalized] if normalized is not None else []
+        if not tool_calls:
+            return reply, []
+
+        normalized_reply = parsed.get("reply")
+        if normalized_reply is None:
+            normalized_reply = parsed.get("content")
+        if normalized_reply is None:
+            normalized_reply = ""
+        if not isinstance(normalized_reply, str):
+            normalized_reply = json.dumps(normalized_reply, ensure_ascii=False)
+        return normalized_reply, tool_calls
+
+    def _parse_tool_payload(self, reply: str) -> dict[str, Any] | None:
+        candidate = reply.strip()
+        if not candidate.startswith("{") and not candidate.startswith("["):
+            return None
+        try:
+            parsed = json.loads(candidate)
+        except ValueError:
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+        return None
+
+    def _normalize_tool_calls(self, raw_calls: Any) -> list[dict[str, Any]]:
+        if not raw_calls:
+            return []
+        if not isinstance(raw_calls, list):
+            raw_calls = [raw_calls]
+        normalized: list[dict[str, Any]] = []
+        for raw_call in raw_calls:
+            call = self._normalize_tool_call(raw_call)
+            if call is not None:
+                normalized.append(call)
+        return normalized
+
+    def _normalize_tool_call(self, raw_call: Any) -> dict[str, Any] | None:
+        if not isinstance(raw_call, dict):
+            return None
+
+        if "name" in raw_call:
+            name = raw_call.get("name")
+            if not name:
+                return None
+            return {
+                "name": str(name),
+                "arguments": self._coerce_tool_arguments(raw_call.get("arguments")),
+            }
+
+        function = raw_call.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            if not name:
+                return None
+            return {
+                "name": str(name),
+                "arguments": self._coerce_tool_arguments(function.get("arguments")),
+            }
+
+        return None
+
+    def _coerce_tool_arguments(self, arguments: Any) -> Any:
+        if arguments is None:
+            return {}
+        if isinstance(arguments, str):
+            stripped = arguments.strip()
+            if not stripped:
+                return {}
+            try:
+                return json.loads(stripped)
+            except ValueError:
+                return arguments
+        return arguments
+
+    def _tool_names_from_descriptors(self, tools: list[dict[str, Any]] | None) -> list[str]:
+        if not tools:
+            return []
+        names: list[str] = []
+        seen: set[str] = set()
+        for tool in tools:
+            name = self._tool_name_from_descriptor(tool)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        return names
+
+    def _tool_name_from_descriptor(self, descriptor: Any) -> str | None:
+        if not isinstance(descriptor, dict):
+            return None
+        name = descriptor.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        function = descriptor.get("function")
+        if isinstance(function, dict):
+            function_name = function.get("name")
+            if isinstance(function_name, str) and function_name.strip():
+                return function_name.strip()
+        return None
 
     def _elapsed_ms(self, start: float) -> int:
         return int((time.perf_counter() - start) * 1000)
@@ -579,6 +737,26 @@ class AIService:
                 lines.append(f"- Requested client personality preset: {request_context.personality_preset}.")
             lines.append("- Client contract follows verbatim:")
             lines.append(request_context.client_system_prompt.strip())
+
+        if request_context and request_context.tools:
+            tool_names = self._tool_names_from_descriptors(request_context.tools)
+            lines.extend(
+                [
+                    "",
+                    "Client tool contract:",
+                    "- The client supplied structured tools and may expect direct tool_calls output.",
+                ]
+            )
+            if tool_names:
+                lines.append(f"- Available client tools: {', '.join(tool_names)}.")
+            if request_context.tool_choice is not None:
+                lines.append(f"- Requested tool choice: {request_context.tool_choice}.")
+            lines.extend(
+                [
+                    "- Prefer the canonical direct tool_calls shape when returning client actions.",
+                    "- Keep tool arguments structured and avoid wrapping tool calls in prose.",
+                ]
+            )
 
         lines.extend(
             [
@@ -696,6 +874,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         if not settings.OPENAI_API_KEY:
             return "OPENAI_API_KEY not configured."
@@ -713,6 +892,10 @@ class AIService:
                 {"role": "user", "content": message},
             ],
         }
+        if request_context and request_context.tools:
+            payload["tools"] = request_context.tools
+        if request_context and request_context.tool_choice is not None:
+            payload["tool_choice"] = request_context.tool_choice
 
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
@@ -725,19 +908,32 @@ class AIService:
             return f"OpenAI error: {response.text}"
 
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        message_payload = data["choices"][0]["message"]
+        tool_calls = self._normalize_tool_calls(message_payload.get("tool_calls"))
+        if not tool_calls:
+            tool_calls = self._normalize_tool_calls(message_payload.get("toolCalls"))
+        if tool_calls:
+            return json.dumps(
+                {
+                    "reply": message_payload.get("content") or "",
+                    "tool_calls": tool_calls,
+                }
+            )
+        return message_payload.get("content") or ""
 
     async def _generate_ollama(
         self,
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         return await self._generate_ollama_with_model(
             settings.OLLAMA_MODEL,
             message,
             history,
             system_prompt=system_prompt,
+            request_context=request_context,
         )
 
     async def _generate_ollama_cloud(
@@ -745,6 +941,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         model = settings.OLLAMA_CLOUD_FALLBACK_MODEL.strip()
         if not model:
@@ -754,6 +951,7 @@ class AIService:
             message,
             history,
             system_prompt=system_prompt,
+            request_context=request_context,
         )
 
     async def _generate_ollama_with_model(
@@ -763,6 +961,7 @@ class AIService:
         history: list[dict[str, str]],
         *,
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         payload = {
             "model": model,
@@ -798,6 +997,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         if aiplatform is None or google_auth is None:
             return "Vertex AI SDK not found. Please install google-cloud-aiplatform."

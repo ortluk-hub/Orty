@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,11 @@ class EscalationContext(BaseModel):
     memory_record_ids: list[str] = Field(default_factory=list)
 
 
+class ChatToolCall(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    arguments: Any = Field(default_factory=dict)
+
+
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
@@ -27,6 +32,8 @@ class ChatRequest(BaseModel):
     personality_preset: str | None = Field(default=None, min_length=1, max_length=80)
     system_prompt: str | None = Field(default=None, max_length=12000)
     recent_messages: list[EscalationMessage] = Field(default_factory=list)
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    tool_choice: Any | None = None
     escalation_context: EscalationContext | None = None
 
 
@@ -34,6 +41,7 @@ class ChatResponse(BaseModel):
     reply: str
     conversation_id: str
     used_history: int = 0
+    tool_calls: list[ChatToolCall] = Field(default_factory=list)
     handled_by: str | None = None
     provider: str | None = None
     fallback_used: bool = False

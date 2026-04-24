@@ -163,6 +163,139 @@ def test_build_system_prompt_can_include_client_contract():
     assert "Always answer outwardly as Jane for Alfred Android." in prompt
 
 
+def test_build_system_prompt_includes_client_tool_contract():
+    service = AIService()
+
+    prompt = service._build_system_prompt(
+        ChatRequestContext(
+            channel="api",
+            requested_client_name="alfred-android",
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "alfred.navigate_to",
+                        "description": "Navigate to a saved place",
+                    },
+                }
+            ],
+            tool_choice="auto",
+        )
+    )
+
+    assert "Client tool contract:" in prompt
+    assert "Available client tools: alfred.navigate_to." in prompt
+    assert "Requested tool choice: auto." in prompt
+    assert "direct tool_calls shape" in prompt
+
+
+def test_generate_with_meta_parses_structured_tool_calls(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
+
+    async def fake_openai(message, history, system_prompt=None, request_context=None):
+        assert request_context is not None
+        assert request_context.tools[0]["function"]["name"] == "alfred.navigate_to"
+        return json.dumps(
+            {
+                "reply": "",
+                "tool_calls": [
+                    {
+                        "name": "alfred.navigate_to",
+                        "arguments": {"destination": "home"},
+                    }
+                ],
+            }
+        )
+
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(
+        service.generate_with_meta(
+            "navigate home",
+            request_context=ChatRequestContext(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {"name": "alfred.navigate_to"},
+                    }
+                ],
+                tool_choice="auto",
+            ),
+        )
+    )
+
+    assert result["reply"] == ""
+    assert result["tool_calls"] == [
+        {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
+
+
+def test_generate_openai_passes_tool_contract_and_normalizes_tool_calls(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-key")
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "ok"
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "alfred.navigate_to",
+                                        "arguments": '{"destination":"home"}',
+                                    }
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+    async def fake_post(self, url, headers=None, json=None):
+        captured["json"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    result = asyncio.run(
+        service._generate_openai(
+            "navigate home",
+            [],
+            request_context=ChatRequestContext(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {"name": "alfred.navigate_to"},
+                    }
+                ],
+                tool_choice="auto",
+            ),
+        )
+    )
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["tools"][0]["function"]["name"] == "alfred.navigate_to"
+    assert payload["tool_choice"] == "auto"
+
+    parsed = json.loads(result)
+    assert parsed["reply"] == ""
+    assert parsed["tool_calls"] == [
+        {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
+
+
 def test_generate_executes_fs_pwd_tool(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")

@@ -1,4 +1,5 @@
 import logging
+import json
 import time
 
 from fastapi import APIRouter, Depends, Request
@@ -41,13 +42,18 @@ async def chat(payload: ChatRequest, request: Request, auth: dict = Depends(get_
             assistant_name=payload.assistant_name,
             personality_preset=payload.personality_preset,
             client_system_prompt=payload.system_prompt,
+            tools=payload.tools,
+            tool_choice=payload.tool_choice,
         ),
     )
     reply = generated["reply"]
+    tool_calls = generated.get("tool_calls") or []
 
     if payload.persist:
         runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=client_id)
-        runtime.memory_store.append_message(conversation_id, 'assistant', reply, client_id=client_id)
+        assistant_content = reply or _assistant_message_content(tool_calls)
+        if assistant_content:
+            runtime.memory_store.append_message(conversation_id, 'assistant', assistant_content, client_id=client_id)
 
     logger.info(
         "chat_request_completed conversation_id=%s client_id=%s provider=%s handled_by=%s fallback_used=%s total_ms=%d message_chars=%d history=%d",
@@ -65,6 +71,7 @@ async def chat(payload: ChatRequest, request: Request, auth: dict = Depends(get_
         reply=reply,
         conversation_id=conversation_id,
         used_history=len(history),
+        tool_calls=tool_calls,
         handled_by=generated.get("handled_by"),
         provider=generated.get("provider"),
         fallback_used=bool(generated.get("fallback_used", False)),
@@ -91,3 +98,13 @@ def _escalation_context_messages(context: EscalationContext | None) -> list[dict
     for msg in context.recent_messages:
         messages.append({"role": msg.role, "content": msg.content})
     return messages
+
+
+def _assistant_message_content(tool_calls: list[dict]) -> str:
+    if not tool_calls:
+        return ""
+    normalized_tool_calls = [
+        call.model_dump() if hasattr(call, "model_dump") else call
+        for call in tool_calls
+    ]
+    return json.dumps({"tool_calls": normalized_tool_calls}, ensure_ascii=False)
