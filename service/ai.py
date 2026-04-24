@@ -150,6 +150,25 @@ class AIService:
     def register_tool(self, name: str, tool: ToolFn) -> None:
         self._tools[name.lower()] = tool
 
+    def _vertex_ai_safety_settings(self) -> list[Any]:
+        from vertexai.generative_models import SafetySetting
+
+        disabled_categories = (
+            SafetySetting.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            SafetySetting.HarmCategory.HARM_CATEGORY_HARASSMENT,
+            SafetySetting.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+            SafetySetting.HarmCategory.HARM_CATEGORY_JAILBREAK,
+            SafetySetting.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            SafetySetting.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+        )
+        return [
+            SafetySetting(
+                category=category,
+                threshold=SafetySetting.HarmBlockThreshold.OFF,
+            )
+            for category in disabled_categories
+        ]
+
     async def generate(
         self,
         message: str,
@@ -1048,7 +1067,10 @@ class AIService:
 
             # If using public foundation models (like Gemini):
             from vertexai.generative_models import Content, GenerativeModel, Part
-            model = GenerativeModel(settings.VERTEX_AI_MODEL_ID)
+            model = GenerativeModel(
+                settings.VERTEX_AI_MODEL_ID,
+                safety_settings=self._vertex_ai_safety_settings(),
+            )
 
             # Constructing the history for Vertex AI
             # Vertex AI's chat history format might differ slightly.

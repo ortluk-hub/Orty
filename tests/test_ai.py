@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import httpx
 
@@ -293,6 +294,60 @@ def test_generate_openai_passes_tool_contract_and_normalizes_tool_calls(monkeypa
     assert parsed["reply"] == ""
     assert parsed["tool_calls"] == [
         {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
+
+
+def test_generate_vertex_ai_disables_safety_settings_at_instantiation(monkeypatch):
+    import service.ai as service_ai
+    import vertexai.generative_models as vertex_generative_models
+
+    service = AIService()
+    monkeypatch.setattr(settings, "VERTEX_AI_PROJECT_ID", "test-project")
+    monkeypatch.setattr(settings, "VERTEX_AI_LOCATION", "us-central1")
+    monkeypatch.setattr(settings, "VERTEX_AI_MODEL_ID", "gemini-1.5-pro")
+    monkeypatch.setattr(settings, "VERTEX_AI_CREDENTIALS_PATH", None)
+    monkeypatch.setattr(
+        service_ai,
+        "google_auth",
+        SimpleNamespace(
+            default=lambda: (object(), "test-project"),
+            load_credentials_from_file=lambda _: (object(), "test-project"),
+            exceptions=SimpleNamespace(DefaultCredentialsError=Exception),
+        ),
+    )
+    monkeypatch.setattr(service_ai.aiplatform, "init", lambda **kwargs: None)
+    monkeypatch.setattr(AIService, "_build_system_prompt", lambda self, request_context=None: None)
+
+    captured: dict[str, object] = {}
+
+    class FakeChatSession:
+        def send_message(self, message):
+            captured["message"] = message
+            return SimpleNamespace(text="vertex-reply")
+
+    class FakeGenerativeModel:
+        def __init__(self, model_name, **kwargs):
+            captured["model_name"] = model_name
+            captured["kwargs"] = kwargs
+
+        def start_chat(self, history=None, response_validation=True):
+            captured["history"] = history
+            captured["response_validation"] = response_validation
+            return FakeChatSession()
+
+    monkeypatch.setattr(vertex_generative_models, "GenerativeModel", FakeGenerativeModel)
+
+    result = asyncio.run(service._generate_vertex_ai("hello", []))
+
+    assert result == "vertex-reply"
+    assert captured["model_name"] == "gemini-1.5-pro"
+    assert [setting.to_dict() for setting in captured["kwargs"]["safety_settings"]] == [
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "OFF"},
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "OFF"},
+        {"category": "HARM_CATEGORY_JAILBREAK", "threshold": "OFF"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "OFF"},
+        {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "OFF"},
     ]
 
 
