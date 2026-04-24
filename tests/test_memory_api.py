@@ -111,6 +111,42 @@ def test_memory_record_list_filters():
     assert all(row['source'] == 'import' for row in rows)
 
 
+def test_memory_record_list_tag_filter_applies_before_limit():
+    created = create_client('Memory Tag Limit Client')
+    token = issue_access_token(created)
+    headers = bearer_headers(token)
+
+    request(
+        'POST',
+        '/v1/memory/records',
+        json={
+            'memory_type': 'fact',
+            'content': 'Special tag record',
+            'tags': ['special'],
+            'source': 'import',
+        },
+        headers=headers,
+    )
+    for index in range(59):
+        request(
+            'POST',
+            '/v1/memory/records',
+            json={
+                'memory_type': 'fact',
+                'content': f'Noise record {index}',
+                'tags': ['noise'],
+                'source': 'import',
+            },
+            headers=headers,
+        )
+
+    filtered = request('GET', '/v1/memory/records?tag=special&limit=50', headers=headers)
+    assert filtered.status_code == 200
+    rows = filtered.json()
+    assert len(rows) == 1
+    assert rows[0]['content'] == 'Special tag record'
+
+
 def test_memory_record_cross_client_access_is_forbidden():
     client_a = create_client('Memory A')
     client_b = create_client('Memory B')

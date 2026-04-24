@@ -38,7 +38,7 @@ This deployment path assumes:
 - `DATABASE_URL` is stored in Secret Manager and points at a reachable PostgreSQL instance
 - Vertex AI credentials come from the Cloud Run service account, not a local model process inside the container
 - `ORTY_SHARED_SECRET` is stored in Secret Manager
-- `ORTY_ALFRED_CLIENT_KEY` is stored in Secret Manager for Alfred client registration
+- `ORTY_ALFRED_CLIENT_KEY` is set as a Cloud Run environment variable for Alfred client registration
 - `/v1/bots` remains disabled on Cloud Run
 
 Until D1 exits, treat Cloud Run as the beta cutover target, not as a finished production platform.

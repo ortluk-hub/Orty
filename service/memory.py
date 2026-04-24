@@ -1,12 +1,15 @@
 from typing import List
 from uuid import uuid4
 
-from service.storage.db import SQLiteDB
+from service.storage.db import Database, build_database
 
 
 class MemoryStore:
-    def __init__(self, db_path: str | None = None):
-        self.db = SQLiteDB(db_path)
+    def __init__(self, db: Database | str | None = None):
+        if isinstance(db, Database):
+            self.db = db
+        else:
+            self.db = build_database(db)
 
     def _connect(self):
         return self.db.connect()

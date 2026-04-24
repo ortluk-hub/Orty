@@ -1,6 +1,8 @@
 ## Unreleased
 
 ### Added
+- Added a PostgreSQL Phase 1 storage seam with `DATABASE_URL` runtime selection, a canonical `postgres_schema_phase1.sql`, and initial adapter coverage for auth/chat-history/bug-report durability while preserving SQLite as the default dev/test path.
+- Added Postgres-capable memory repository coverage for `memory_records` and `memory_summaries`, plus an opt-in test harness path (`ORTY_TEST_DATABASE_URL`) for running the existing auth/memory/bug API slice against a real PostgreSQL instance.
 - Added Alfred memory sync compatibility endpoints at `POST /memory/sync` and `POST /v1/memory/sync`, with canonical sync snapshots backed by `memory_records` rows keyed by `external_key`.
 - Added sync-aware memory repository operations for upsert-by-external-key, canonical listing, and soft deletion of sync-managed records removed from the latest Alfred snapshot.
 - Added a new `codey` supervisor bot type that drafts a coding-agent architecture plan with intent-resolver routing, mode-scoped system prompts, cloud/local model fallback strategy, Docker sandbox policy, and restricted network guidance.
@@ -14,6 +16,7 @@
 - Added unit and API tests covering automation extension target normalization, planning events, and supervisor execution flow.
 
 ### Changed
+- Clarified deployment positioning in the README and Cloud Run docs, and added explicit deployment roadmap markers (D0/D1/D2) for the beta cutover path.
 - Refactored API/runtime wiring around a request-scoped runtime container so routes, auth helpers, UI flows, and supervisor services resolve repositories and services from the active app runtime instead of process-global module singletons.
 - Refined the `codey` architecture payload with an explicit intent-resolver system prompt, stricter sandbox internet-policy fields, and concrete implementation notes for containerized tooling + Alembic-backed memory traces.
 - Added `/chat` conversation controls: `history_limit` (bounded 1-50), `reset_conversation`, and `persist` flags, and now return `used_history` in `ChatResponse` for observability.

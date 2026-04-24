@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from service.config import settings
 from service.api.deps import (
     ensure_bot_owned_or_admin,
     get_request_auth,
@@ -10,8 +11,18 @@ from service.models.schemas import BotCreateRequest, BotCreateResponse, BotEvent
 router = APIRouter(prefix='/v1/bots', tags=['v1-bots'])
 
 
+def _require_bot_control_surface() -> None:
+    if settings.ENABLE_BOT_CONTROL_SURFACE:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail="Bot control surface is disabled for this deployment profile.",
+    )
+
+
 @router.post('', response_model=BotCreateResponse)
 async def create_bot(payload: BotCreateRequest, request: Request, auth: dict = Depends(get_request_auth)):
+    _require_bot_control_surface()
     runtime = get_runtime(request)
     if auth["is_admin"]:
         if not payload.owner_client_id:
@@ -26,6 +37,7 @@ async def create_bot(payload: BotCreateRequest, request: Request, auth: dict = D
 
 @router.post('/{bot_id}/start', response_model=BotStatusResponse)
 async def start_bot(bot_id: str, request: Request, auth: dict = Depends(get_request_auth)):
+    _require_bot_control_surface()
     runtime = get_runtime(request)
     bot = runtime.bot_registry.get_bot(bot_id)
     ensure_bot_owned_or_admin(bot, auth["client_id"], auth["is_admin"])
@@ -34,6 +46,7 @@ async def start_bot(bot_id: str, request: Request, auth: dict = Depends(get_requ
 
 @router.post('/{bot_id}/stop', response_model=BotStatusResponse)
 async def stop_bot(bot_id: str, request: Request, auth: dict = Depends(get_request_auth)):
+    _require_bot_control_surface()
     runtime = get_runtime(request)
     bot = runtime.bot_registry.get_bot(bot_id)
     ensure_bot_owned_or_admin(bot, auth["client_id"], auth["is_admin"])
@@ -42,6 +55,7 @@ async def stop_bot(bot_id: str, request: Request, auth: dict = Depends(get_reque
 
 @router.post('/{bot_id}/pause', response_model=BotStatusResponse)
 async def pause_bot(bot_id: str, request: Request, auth: dict = Depends(get_request_auth)):
+    _require_bot_control_surface()
     runtime = get_runtime(request)
     bot = runtime.bot_registry.get_bot(bot_id)
     ensure_bot_owned_or_admin(bot, auth["client_id"], auth["is_admin"])
@@ -50,6 +64,7 @@ async def pause_bot(bot_id: str, request: Request, auth: dict = Depends(get_requ
 
 @router.get('/{bot_id}', response_model=BotStatusResponse)
 async def get_bot_status(bot_id: str, request: Request, auth: dict = Depends(get_request_auth)):
+    _require_bot_control_surface()
     bot = get_runtime(request).bot_registry.get_bot(bot_id)
     ensure_bot_owned_or_admin(bot, auth["client_id"], auth["is_admin"])
     return bot
@@ -62,6 +77,7 @@ async def get_bot_events(
     limit: int = Query(default=100, le=1000),
     auth: dict = Depends(get_request_auth),
 ):
+    _require_bot_control_surface()
     runtime = get_runtime(request)
     bot = runtime.bot_registry.get_bot(bot_id)
     ensure_bot_owned_or_admin(bot, auth["client_id"], auth["is_admin"])

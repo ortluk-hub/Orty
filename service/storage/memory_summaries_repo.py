@@ -1,11 +1,26 @@
+from datetime import datetime
 from uuid import uuid4
 
-from service.storage.db import SQLiteDB, utc_now_iso
+from service.storage.db import Database, utc_now_iso
 
 
 class MemorySummariesRepository:
-    def __init__(self, db: SQLiteDB):
+    def __init__(self, db: Database):
         self.db = db
+
+    @staticmethod
+    def _normalize_timestamp(value) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    def _row_to_payload(self, row) -> dict:
+        payload = dict(row)
+        payload["created_at"] = self._normalize_timestamp(payload.get("created_at"))
+        payload["updated_at"] = self._normalize_timestamp(payload.get("updated_at"))
+        return payload
 
     def create_summary(
         self,
@@ -46,7 +61,7 @@ class MemorySummariesRepository:
                 "SELECT * FROM memory_summaries WHERE summary_id = ?",
                 (summary_id,),
             ).fetchone()
-        return dict(row) if row else None
+        return self._row_to_payload(row) if row else None
 
     def list_summaries(
         self,
@@ -68,7 +83,7 @@ class MemorySummariesRepository:
 
         with self.db.connect() as conn:
             rows = conn.execute(query, tuple(params)).fetchall()
-        return [dict(row) for row in rows]
+        return [self._row_to_payload(row) for row in rows]
 
     def get_latest_summary(self, *, client_id: str, conversation_id: str) -> dict | None:
         with self.db.connect() as conn:
@@ -82,4 +97,4 @@ class MemorySummariesRepository:
                 """,
                 (client_id, conversation_id),
             ).fetchone()
-        return dict(row) if row else None
+        return self._row_to_payload(row) if row else None

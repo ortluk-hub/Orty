@@ -1,6 +1,12 @@
 from fastapi import Header, HTTPException
+import hashlib
 
 from service.config import settings
+
+
+def hash_token(token: str) -> str:
+    """Hash a token using SHA-256."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 async def verify_secret(x_orty_secret: str = Header(...)):

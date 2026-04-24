@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -14,8 +15,15 @@ if str(ROOT) not in sys.path:
 def isolated_runtime(tmp_path):
     from service.api import app
     from service.api.deps import reset_runtime
+    from service.config import settings
 
-    runtime = reset_runtime(str(tmp_path / "orty-test.db"))
+    database_url = os.getenv("ORTY_TEST_DATABASE_URL")
+    original_database_url = settings.DATABASE_URL
+    if database_url:
+        settings.DATABASE_URL = database_url
+        runtime = reset_runtime()
+    else:
+        runtime = reset_runtime(str(tmp_path / "orty-test.db"))
     app.state.runtime = runtime
     yield
     try:
@@ -27,6 +35,8 @@ def isolated_runtime(tmp_path):
             if not task.done():
                 task.cancel()
         runtime.bot_runner._prune_finished_tasks()
+    finally:
+        settings.DATABASE_URL = original_database_url
 
 
 @pytest.fixture

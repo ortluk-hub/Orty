@@ -60,9 +60,13 @@ def _record_to_sync_item(record: dict) -> MemorySyncItem:
     )
 
 
-def _iso_to_epoch_ms(value: str) -> int:
+def _iso_to_epoch_ms(value) -> int:
     from datetime import datetime
 
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, datetime):
+        return int(value.timestamp() * 1000)
     return int(datetime.fromisoformat(value).timestamp() * 1000)
 
 
