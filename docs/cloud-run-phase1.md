@@ -40,6 +40,7 @@ This deployment path assumes:
 - `ORTY_SHARED_SECRET` is stored in Secret Manager
 - `ORTY_ALFRED_CLIENT_KEY` is set as a Cloud Run environment variable for Alfred client registration
 - Cloud Run is configured for HTTP/2 end-to-end so streaming and model download traffic stay on the h2c path
+- The container entrypoint uses an h2c-capable ASGI server (`Hypercorn`); plain `uvicorn` will 502 under Cloud Run HTTP/2
 - A Cloud Storage bucket is mounted at `/models` so GGUF uploads persist without rebuilding the container
 - The default deploy script provisions `gs://ortypublic-models` for the mounted model volume
 - `/v1/bots` remains disabled on Cloud Run

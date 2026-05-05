@@ -6,4 +6,4 @@
 #  orty:local
 
 
-uvicorn service.api:app --host 0.0.0.0 --port 8080
+python -m hypercorn service.api:app --bind 0.0.0.0:8080 --worker-class asyncio --access-logfile - --error-logfile -

@@ -234,7 +234,7 @@ ORTY_MODEL_STORAGE_ROOT=/models
 ## Running the Server
 
 ```
-uvicorn service.api:app --host 0.0.0.0 --port 8080
+python orty.py
 ```
 
 Health check endpoint:

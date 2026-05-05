@@ -1,11 +1,18 @@
-import uvicorn
+import asyncio
+
+from hypercorn.asyncio import serve
+from hypercorn.config import Config
+
 from service.api import app
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "service.api:app",
-        host="0.0.0.0",
-        port=8080,
-        reload=False
-    )
 
+def main() -> None:
+    config = Config()
+    config.bind = ["0.0.0.0:8080"]
+    config.accesslog = "-"
+    config.errorlog = "-"
+    asyncio.run(serve(app, config))
+
+
+if __name__ == "__main__":
+    main()

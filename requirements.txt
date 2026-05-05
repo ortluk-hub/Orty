@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+hypercorn
 pydantic
 python-dotenv
 httpx

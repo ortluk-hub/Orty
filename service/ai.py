@@ -26,7 +26,7 @@ except ImportError:
 
 from service.config import settings
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 GenerateFn = Callable[..., Awaitable[str]]
 ToolResult = str | Awaitable[str]

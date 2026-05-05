@@ -8,7 +8,7 @@ from service.ai import ChatRequestContext
 from service.models.schemas import ChatRequest, ChatResponse, EscalationContext
 
 router = APIRouter()
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 
 @router.post('/chat', response_model=ChatResponse)

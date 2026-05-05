@@ -16,7 +16,7 @@ ORTY_URL="http://${ORTY_HOST}:${ORTY_PORT}"
 HEALTH_URL="${ORTY_URL}/health"
 HOMEPAGE_URL="${ORTY_URL}/homepage"
 CLOUDFLARED_BIN="${CLOUDFLARED_BIN:-/tmp/cloudflared}"
-UVICORN_BIN="${ROOT_DIR}/.venv/bin/python"
+ORTY_PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
 SYNC_ALFRED=0
 
 resolve_lan_url() {
@@ -81,14 +81,14 @@ extract_tunnel_url() {
   rg -o "https://[A-Za-z0-9.-]+\\.trycloudflare\\.com" -m 1 "${CLOUDFLARED_LOG_FILE}" 2>/dev/null
 }
 
-require_bin "${UVICORN_BIN}" "Orty virtualenv python"
+require_bin "${ORTY_PYTHON_BIN}" "Orty virtualenv python"
 require_bin "${CLOUDFLARED_BIN}" "cloudflared"
 
 if ! is_pid_running "${ORTY_PID_FILE}"; then
   : > "${ORTY_LOG_FILE}"
   (
     cd "${ROOT_DIR}"
-    "${UVICORN_BIN}" -m uvicorn service.api:app --host "${ORTY_HOST}" --port "${ORTY_PORT}"
+    "${ORTY_PYTHON_BIN}" -m hypercorn service.api:app --bind "${ORTY_HOST}:${ORTY_PORT}" --worker-class asyncio --access-logfile - --error-logfile -
   ) >"${ORTY_LOG_FILE}" 2>&1 < /dev/null &
   echo $! > "${ORTY_PID_FILE}"
 fi
