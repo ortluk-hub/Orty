@@ -14,6 +14,8 @@ DATABASE_URL_SECRET="${DATABASE_URL_SECRET:?Set DATABASE_URL_SECRET to the Secre
 DATABASE_URL_SECRET_VERSION="${DATABASE_URL_SECRET_VERSION:-latest}"
 ORTY_SHARED_SECRET_SECRET="${ORTY_SHARED_SECRET_SECRET:-orty-shared-secret}"
 ORTY_SHARED_SECRET_VERSION="${ORTY_SHARED_SECRET_VERSION:-latest}"
+ORTY_ADMIN_SECRET_SECRET="${ORTY_ADMIN_SECRET_SECRET:-orty-admin-secret}"
+ORTY_ADMIN_SECRET_VERSION="${ORTY_ADMIN_SECRET_VERSION:-latest}"
 VERTEX_AI_LOCATION="${VERTEX_AI_LOCATION:-us-central1}"
 VERTEX_AI_MODEL_ID="${VERTEX_AI_MODEL_ID:-publishers/google/models/gemini-2.5-flash}"
 ALLOW_UNAUTHENTICATED="${ALLOW_UNAUTHENTICATED:-true}"
@@ -38,7 +40,7 @@ assumption() {
 
 assumption "Cloud Run should use Vertex AI as the primary inference path."
 assumption "The deployed container should not depend on Ollama or any local inference process."
-assumption "DATABASE_URL and ORTY_SHARED_SECRET already exist in Secret Manager."
+assumption "DATABASE_URL, ORTY_SHARED_SECRET, and ORTY_ADMIN_SECRET already exist in Secret Manager."
 assumption "If DATABASE_URL uses the Cloud SQL socket path, INSTANCE_CONNECTION_NAME should be set for Cloud Run attachment."
 assumption "If deployment fails after traffic was serving, rollback should target the previous ready revision."
 
@@ -90,7 +92,7 @@ deploy_args=(
   --use-http2
   --execution-environment gen2
   --set-env-vars "ORTY_DEPLOYMENT_PROFILE=cloud_run_interactive,LLM_PROVIDER=vertex_ai,ENABLE_CLOUD_FALLBACK=false,ENABLE_PARALLEL_PROVIDER_RACE=false,ENABLE_BOT_CONTROL_SURFACE=false,ALLOW_LEGACY_CLIENT_HEADERS=false,VERTEX_AI_PROJECT_ID=${PROJECT_ID},VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION},VERTEX_AI_MODEL_ID=${VERTEX_AI_MODEL_ID},ORTY_ALFRED_CLIENT_KEY=${ORTY_ALFRED_CLIENT_KEY:-alfred-android},ORTY_MODEL_STORAGE_ROOT=${MODEL_MOUNT_PATH}"
-  --set-secrets "DATABASE_URL=${DATABASE_URL_SECRET}:${DATABASE_URL_SECRET_VERSION},ORTY_SHARED_SECRET=${ORTY_SHARED_SECRET_SECRET}:${ORTY_SHARED_SECRET_VERSION}"
+  --set-secrets "DATABASE_URL=${DATABASE_URL_SECRET}:${DATABASE_URL_SECRET_VERSION},ORTY_SHARED_SECRET=${ORTY_SHARED_SECRET_SECRET}:${ORTY_SHARED_SECRET_VERSION},ORTY_ADMIN_SECRET=${ORTY_ADMIN_SECRET_SECRET}:${ORTY_ADMIN_SECRET_VERSION}"
   --add-volume "name=${MODEL_VOLUME_NAME},type=cloud-storage,bucket=${MODEL_BUCKET_NAME}"
   --add-volume-mount "volume=${MODEL_VOLUME_NAME},mount-path=${MODEL_MOUNT_PATH}"
 )
