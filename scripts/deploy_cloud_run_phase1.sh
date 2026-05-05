@@ -5,6 +5,9 @@ PROJECT_ID="${PROJECT_ID:?Set PROJECT_ID to your Google Cloud project id.}"
 REGION="${REGION:-us-central1}"
 SERVICE_NAME="${SERVICE_NAME:-orty-api-beta}"
 ARTIFACT_REPOSITORY="${ARTIFACT_REPOSITORY:-orty}"
+MODEL_BUCKET_NAME="${MODEL_BUCKET_NAME:-ortypublic-models}"
+MODEL_VOLUME_NAME="${MODEL_VOLUME_NAME:-orty-models}"
+MODEL_MOUNT_PATH="${MODEL_MOUNT_PATH:-/models}"
 IMAGE_TAG="${IMAGE_TAG:-$(date +%Y%m%d-%H%M%S)}"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/${SERVICE_NAME}:${IMAGE_TAG}"
 DATABASE_URL_SECRET="${DATABASE_URL_SECRET:?Set DATABASE_URL_SECRET to the Secret Manager secret name for DATABASE_URL.}"
@@ -42,7 +45,19 @@ assumption "If deployment fails after traffic was serving, rollback should targe
 gcloud config set project "${PROJECT_ID}" >/dev/null
 PREVIOUS_REVISION="$(gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true)"
 
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com >/dev/null
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com storage.googleapis.com >/dev/null
+
+if ! gcloud storage buckets describe "gs://${MODEL_BUCKET_NAME}" >/dev/null 2>&1; then
+  gcloud storage buckets create "gs://${MODEL_BUCKET_NAME}" \
+    --location="${REGION}" \
+    --uniform-bucket-level-access
+fi
+
+if [[ -n "${SERVICE_ACCOUNT}" ]]; then
+  gcloud storage buckets add-iam-policy-binding "gs://${MODEL_BUCKET_NAME}" \
+    --member="serviceAccount:${SERVICE_ACCOUNT}" \
+    --role="roles/storage.objectAdmin"
+fi
 
 if [[ "${CREATE_ARTIFACT_REPOSITORY}" == "true" ]]; then
   if ! gcloud artifacts repositories describe "${ARTIFACT_REPOSITORY}" --location "${REGION}" >/dev/null 2>&1; then
@@ -72,8 +87,12 @@ deploy_args=(
   --timeout "${TIMEOUT}"
   --min-instances "${MIN_INSTANCES}"
   --max-instances "${MAX_INSTANCES}"
-  --set-env-vars "ORTY_DEPLOYMENT_PROFILE=cloud_run_interactive,LLM_PROVIDER=vertex_ai,ENABLE_CLOUD_FALLBACK=false,ENABLE_PARALLEL_PROVIDER_RACE=false,ENABLE_BOT_CONTROL_SURFACE=false,ALLOW_LEGACY_CLIENT_HEADERS=false,VERTEX_AI_PROJECT_ID=${PROJECT_ID},VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION},VERTEX_AI_MODEL_ID=${VERTEX_AI_MODEL_ID},ORTY_ALFRED_CLIENT_KEY=${ORTY_ALFRED_CLIENT_KEY:-alfred-android}"
+  --use-http2
+  --execution-environment gen2
+  --set-env-vars "ORTY_DEPLOYMENT_PROFILE=cloud_run_interactive,LLM_PROVIDER=vertex_ai,ENABLE_CLOUD_FALLBACK=false,ENABLE_PARALLEL_PROVIDER_RACE=false,ENABLE_BOT_CONTROL_SURFACE=false,ALLOW_LEGACY_CLIENT_HEADERS=false,VERTEX_AI_PROJECT_ID=${PROJECT_ID},VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION},VERTEX_AI_MODEL_ID=${VERTEX_AI_MODEL_ID},ORTY_ALFRED_CLIENT_KEY=${ORTY_ALFRED_CLIENT_KEY:-alfred-android},ORTY_MODEL_STORAGE_ROOT=${MODEL_MOUNT_PATH}"
   --set-secrets "DATABASE_URL=${DATABASE_URL_SECRET}:${DATABASE_URL_SECRET_VERSION},ORTY_SHARED_SECRET=${ORTY_SHARED_SECRET_SECRET}:${ORTY_SHARED_SECRET_VERSION}"
+  --add-volume "name=${MODEL_VOLUME_NAME},type=cloud-storage,bucket=${MODEL_BUCKET_NAME}"
+  --add-volume-mount "volume=${MODEL_VOLUME_NAME},mount-path=${MODEL_MOUNT_PATH}"
 )
 
 if [[ -n "${SERVICE_ACCOUNT}" ]]; then
