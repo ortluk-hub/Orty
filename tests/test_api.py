@@ -470,6 +470,14 @@ def test_chat_passes_rich_tool_contract_and_returns_tool_calls(monkeypatch):
     assert captured["request_context"].tools[0]["function"]["name"] == "alfred.navigate_to"
     assert captured["request_context"].tool_choice == "auto"
 
+    primary_client = runtime.clients_repo.get_primary_client()
+    assert primary_client is not None
+    persisted = runtime.memory_store.get_recent_messages(
+        body["conversation_id"],
+        client_id=primary_client["client_id"],
+    )
+    assert persisted == [{"role": "user", "content": "Take me home."}]
+
 
 def test_chat_returns_generation_metadata(monkeypatch):
     _force_serial_openai(monkeypatch)

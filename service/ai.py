@@ -188,6 +188,15 @@ class AIService:
         provider = settings.LLM_PROVIDER.lower()
         history = history or []
         system_prompt = self._build_system_prompt(request_context=request_context)
+        if request_context and request_context.tools:
+            selected_provider = self._select_tool_safe_provider(provider)
+            if selected_provider != provider:
+                logger.info(
+                    "tool_request_provider_override preferred=%s selected=%s",
+                    provider,
+                    selected_provider,
+                )
+            provider = selected_provider
 
         tool_result = await self._maybe_execute_tool(message, request_context=request_context)
         if tool_result is not None:
@@ -227,6 +236,18 @@ class AIService:
             return self._finalize_generation_result(result, request_context=request_context)
 
         fallback_provider = settings.CLOUD_FALLBACK_PROVIDER.lower()
+        if request_context and request_context.tools:
+            selected_fallback_provider = self._select_tool_safe_provider(
+                fallback_provider,
+                exclude={provider},
+            )
+            if selected_fallback_provider != fallback_provider:
+                logger.info(
+                    "tool_request_fallback_override preferred=%s selected=%s",
+                    fallback_provider,
+                    selected_fallback_provider,
+                )
+            fallback_provider = selected_fallback_provider
         fallback_generator = self._providers.get(fallback_provider) if fallback_provider else None
         race_result = await self._maybe_generate_with_race(
             provider=provider,
@@ -491,6 +512,32 @@ class AIService:
             return "vertex_ai_primary"
         return normalized
 
+    def _select_tool_safe_provider(
+        self,
+        preferred: str,
+        *,
+        exclude: set[str] | None = None,
+    ) -> str:
+        normalized = preferred.lower()
+        excluded = {provider.lower() for provider in (exclude or set())}
+        if normalized != "vertex_ai" and normalized not in excluded:
+            return normalized
+
+        for candidate in self._configured_tool_providers():
+            if candidate not in excluded:
+                return candidate
+        return normalized
+
+    def _configured_tool_providers(self) -> list[str]:
+        candidates: list[str] = []
+        if settings.OPENAI_API_KEY:
+            candidates.append("openai")
+        if settings.OLLAMA_CLOUD_FALLBACK_MODEL.strip():
+            candidates.append("ollama_cloud")
+        if settings.OLLAMA_MODEL.strip():
+            candidates.append("ollama")
+        return candidates or ["openai", "ollama_cloud", "ollama"]
+
     async def _timed_provider_call(
         self,
         *,
@@ -622,7 +669,7 @@ class AIService:
         return normalized_reply, tool_calls
 
     def _parse_tool_payload(self, reply: str) -> dict[str, Any] | None:
-        candidate = reply.strip()
+        candidate = self._unwrap_code_fences(reply.strip())
         if not candidate.startswith("{") and not candidate.startswith("["):
             return None
         try:
@@ -632,6 +679,12 @@ class AIService:
         if isinstance(parsed, dict):
             return parsed
         return None
+
+    def _unwrap_code_fences(self, candidate: str) -> str:
+        match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, flags=re.I | re.S)
+        if match:
+            return match.group(1).strip()
+        return candidate
 
     def _normalize_tool_calls(self, raw_calls: Any) -> list[dict[str, Any]]:
         if not raw_calls:
@@ -773,6 +826,7 @@ class AIService:
             lines.extend(
                 [
                     "- Prefer the canonical direct tool_calls shape when returning client actions.",
+                    "- Return raw JSON for tool calls if you use JSON, and never wrap it in markdown fences.",
                     "- Keep tool arguments structured and avoid wrapping tool calls in prose.",
                 ]
             )
@@ -1109,6 +1163,7 @@ class AIService:
             # Let's try a common pattern: passing history directly and the system prompt might be handled by the model.
             chat_session = model.start_chat(
                 history=vertex_history or None, # Pass the constructed history
+                response_validation=False,
                 # If the model supports system instructions directly:
                 # system_instruction="You are Orty, a concise and intelligent on-device assistant.",
             )

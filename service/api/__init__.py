@@ -11,6 +11,8 @@ from service.api.routes.v1_bots import router as v1_bots_router
 from service.api.routes.v1_bug_reports import router as v1_bug_reports_router
 from service.api.routes.v1_bugs_conversational import router as v1_bugs_conv_router
 from service.api.routes.v1_clients import router as v1_clients_router
+from service.api.routes.v1_models import admin_router as v1_models_admin_router
+from service.api.routes.v1_models import router as v1_models_router
 from service.api.routes.v1_memory import router as v1_memory_router
 from service.api.routes.v1_memory import compat_router as memory_sync_compat_router
 from service.api.routes.v1_stt import router as v1_stt_router
@@ -35,6 +37,8 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(v1_auth_router)
     app.include_router(v1_clients_router)
+    app.include_router(v1_models_router)
+    app.include_router(v1_models_admin_router)
     app.include_router(v1_bug_reports_router)
     app.include_router(v1_bugs_conv_router)  # Conversational bug tools
     app.include_router(v1_memory_router)

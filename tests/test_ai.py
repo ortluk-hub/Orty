@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from service.ai import AIService, ChatRequestContext
 from service.config import settings
@@ -234,6 +235,98 @@ def test_generate_with_meta_parses_structured_tool_calls(monkeypatch):
     ]
 
 
+def test_generate_with_meta_parses_fenced_structured_tool_calls(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
+
+    async def fake_openai(message, history, system_prompt=None, request_context=None):
+        return """```json
+        {
+          "reply": "",
+          "tool_calls": [
+            {
+              "name": "alfred.navigate_to",
+              "arguments": {"destination": "home"}
+            }
+          ]
+        }
+        ```"""
+
+    service.register_provider("openai", fake_openai)
+
+    result = asyncio.run(
+        service.generate_with_meta(
+            "navigate home",
+            request_context=ChatRequestContext(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {"name": "alfred.navigate_to"},
+                    }
+                ],
+                tool_choice="auto",
+            ),
+        )
+    )
+
+    assert result["reply"] == ""
+    assert result["tool_calls"] == [
+        {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
+
+
+def test_generate_with_meta_routes_tool_requests_away_from_vertex_ai(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "vertex_ai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
+
+    called: dict[str, bool] = {}
+
+    async def fake_openai(message, history, system_prompt=None, request_context=None):
+        called["openai"] = True
+        return json.dumps(
+            {
+                "reply": "",
+                "tool_calls": [
+                    {
+                        "name": "alfred.navigate_to",
+                        "arguments": {"destination": "home"},
+                    }
+                ],
+            }
+        )
+
+    async def fake_vertex(message, history, system_prompt=None, request_context=None):
+        raise AssertionError("vertex_ai should not be selected for tool requests")
+
+    service.register_provider("openai", fake_openai)
+    service.register_provider("vertex_ai", fake_vertex)
+
+    result = asyncio.run(
+        service.generate_with_meta(
+            "navigate home",
+            request_context=ChatRequestContext(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {"name": "alfred.navigate_to"},
+                    }
+                ],
+                tool_choice="auto",
+            ),
+        )
+    )
+
+    assert called["openai"] is True
+    assert result["tool_calls"] == [
+        {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
+
+
 def test_generate_openai_passes_tool_contract_and_normalizes_tool_calls(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-key")
@@ -298,6 +391,7 @@ def test_generate_openai_passes_tool_contract_and_normalizes_tool_calls(monkeypa
 
 
 def test_generate_vertex_ai_disables_safety_settings_at_instantiation(monkeypatch):
+    pytest.importorskip("vertexai.generative_models")
     import service.ai as service_ai
     import vertexai.generative_models as vertex_generative_models
 
@@ -341,6 +435,7 @@ def test_generate_vertex_ai_disables_safety_settings_at_instantiation(monkeypatc
 
     assert result == "vertex-reply"
     assert captured["model_name"] == "gemini-1.5-pro"
+    assert captured["response_validation"] is False
     assert [setting.to_dict() for setting in captured["kwargs"]["safety_settings"]] == [
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "OFF"},
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},

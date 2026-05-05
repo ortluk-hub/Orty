@@ -50,6 +50,7 @@ The next planned milestone is **D1: PostgreSQL-backed Cloud Run beta cutover**.
 ### Integration Contract
 - Alfred-Orty integration contract (auth, escalation, and memory roadmap): `docs/alfred-orty-integration-contract-v1.md`
 - Codey supervised-worker integration request: `docs/codey-supervisor-integration-request-v1.md`
+- Alfred model distribution contract for onboarding GGUF downloads: `OR_CONTRACT_PHASE_3.md`
 - Orty-related projects standard operating procedure: `docs/orty-related-projects-sop-v1.md`
 
 ### User Interface Status
@@ -220,6 +221,10 @@ CLOUD_FALLBACK_PROVIDER=openai
 SQLITE_PATH=data/orty.db
 SQLITE_TIMEOUT_SECONDS=5
 ALLOW_LEGACY_CLIENT_HEADERS=true
+ORTY_ADMIN_SECRET=your_model_upload_secret_here
+ORTY_MODEL_STORAGE_ROOT=/models
+# optional default registry hint if the mounted bucket contains multiple GGUF files
+# ORTY_DEFAULT_MODEL_ID=llama-3-8b-instruct-q4_k_m.gguf
 ```
 
 `ORTY_SHARED_SECRET` is required for admin endpoints (`/v1/clients`, admin introspection/override flows).

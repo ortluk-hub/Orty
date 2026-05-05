@@ -221,6 +221,14 @@ class ClientIntrospectResponse(BaseModel):
     last_used_at: str | None = None
 
 
+class ModelRegistryItemResponse(BaseModel):
+    id: str
+    name: str
+    size_bytes: int
+    sha256: str
+    is_default: bool = False
+
+
 class MemoryRecordCreateRequest(BaseModel):
     client_id: str | None = None
     memory_type: str = Field(min_length=1, max_length=100)
