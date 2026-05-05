@@ -1,23 +1,6 @@
-"""Bug report and task tools for Orty - conversational interface to bug tracking and Codey integration.
+"""Bug report and task tools for Orty.
 
-This module provides Orty with tool-like access to:
-- List/search bug reports
-- Get bug details and status
-- Submit new bugs OR general tasks (features, planning, etc.)
-- Forward bugs to Codey
-- Check Codey task status
-- Approve/reject Codey plans
-- Chat about bug workflow
-
-Usage in conversation:
-User: "Show me all pending bugs"
-Orty: [calls list_bug_reports(status="pending")] → displays results
-
-User: "Task Codey with planning a new auth feature"
-Orty: [calls submit_task(type="planning_task", ...)] → creates task
-
-User: "What's the status of bug 93c4c855?"
-Orty: [calls get_bug_report("93c4c855")] → displays status
+This module provides conversational access to bug tracking and Codey integration.
 """
 
 import logging
@@ -128,6 +111,7 @@ class BugReportTools:
             "codey_status": bug.get("codey_status"),
             "codey_task_id": bug.get("codey_task_id"),
             "client": bug.get("client"),
+            "client_id": bug.get("client_id"),
             "metadata": bug.get("metadata", {}),
             "created_at": bug.get("created_at"),
         }
@@ -182,8 +166,7 @@ class BugReportTools:
         logger.info(f"Submitting {task_type}: {title}")
 
         # For now, store as bug report with metadata (can be extended later)
-        primary_client = self.bug_reports_repo.db.connect()
-        with primary_client:
+        with self.bug_reports_repo.db.connect() as primary_client:
             row = primary_client.execute(
                 "SELECT client_id FROM clients WHERE is_primary = 1 LIMIT 1"
             ).fetchone()
@@ -195,7 +178,7 @@ class BugReportTools:
             client="orty-chat",
             source=f"task-{task_type}",
             title=title,
-            summary=description[:200],  # Brief summary
+            summary=description[:200],
             details=description,
             metadata={
                 "task_type": task_type,
@@ -256,8 +239,7 @@ class BugReportTools:
         logger.info(f"Submitting bug: {title}")
 
         # Get primary client ID for submission
-        primary_client = self.bug_reports_repo.db.connect()
-        with primary_client:
+        with self.bug_reports_repo.db.connect() as primary_client:
             row = primary_client.execute(
                 "SELECT client_id FROM clients WHERE is_primary = 1 LIMIT 1"
             ).fetchone()
@@ -358,7 +340,7 @@ class BugReportTools:
         }
 
     def reject_codey_plan(self, report_id: str, reason: str = "Plan rejected by Orty") -> dict | None:
-        """Reject a Codey fix plan.
+        """Reject a Codey fix plan for a bug.
 
         Args:
             report_id: Bug report ID
