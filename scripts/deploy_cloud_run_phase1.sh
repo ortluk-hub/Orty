@@ -34,6 +34,11 @@ INSTANCE_CONNECTION_NAME="${INSTANCE_CONNECTION_NAME:-}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
+PYTHON_BIN="${PYTHON_BIN:-${REPO_ROOT}/.venv/bin/python}"
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  PYTHON_BIN="${PYTHON_BIN:-python3}"
+fi
+
 assumption() {
   printf '[assumption] %s\n' "$*"
 }
@@ -72,7 +77,52 @@ fi
 
 if [[ "${APPLY_SCHEMA}" == "true" ]]; then
   DATABASE_URL="$(gcloud secrets versions access "${DATABASE_URL_SECRET_VERSION}" --secret="${DATABASE_URL_SECRET}")"
-  DATABASE_URL="${DATABASE_URL}" python3 "${SCRIPT_DIR}/apply_postgres_schema.py"
+  SCHEMA_PROXY_PID=""
+  if [[ "${DATABASE_URL}" =~ host=/cloudsql/([^?]+) ]]; then
+    INSTANCE_CONNECTION_NAME="${BASH_REMATCH[1]}"
+    CLOUD_SQL_PROXY_BIN="${CLOUD_SQL_PROXY_BIN:-${HOME}/bin/cloud-sql-proxy}"
+    if [[ ! -x "${CLOUD_SQL_PROXY_BIN}" ]]; then
+      printf '[deploy] cloud-sql-proxy not found at %s
+' "${CLOUD_SQL_PROXY_BIN}" >&2
+      exit 1
+    fi
+
+    CLOUD_SQL_PROXY_PORT="${CLOUD_SQL_PROXY_PORT:-5432}"
+    "${CLOUD_SQL_PROXY_BIN}" "${INSTANCE_CONNECTION_NAME}" --address 127.0.0.1 --port "${CLOUD_SQL_PROXY_PORT}" --quiet >/tmp/orty-cloud-sql-proxy.log 2>&1 &
+    SCHEMA_PROXY_PID="$!"
+    trap 'if [[ -n "${SCHEMA_PROXY_PID}" ]]; then kill "${SCHEMA_PROXY_PID}" >/dev/null 2>&1 || true; fi' EXIT
+
+    for _ in {1..30}; do
+      if (echo > /dev/tcp/127.0.0.1/${CLOUD_SQL_PROXY_PORT}) >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+
+    DATABASE_URL="$(python3 - <<'PY' "${DATABASE_URL}" "${CLOUD_SQL_PROXY_PORT}"
+import sys
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+
+raw_url = sys.argv[1]
+port = sys.argv[2]
+parts = urlsplit(raw_url)
+query_items = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != 'host']
+netloc = parts.netloc
+if '@' in netloc:
+    auth, _ = netloc.split('@', 1)
+    netloc = f'{auth}@127.0.0.1:{port}'
+else:
+    netloc = f'127.0.0.1:{port}'
+print(urlunsplit((parts.scheme, netloc, parts.path, urlencode(query_items), parts.fragment)))
+PY
+)"
+  fi
+
+  DATABASE_URL="${DATABASE_URL}" "${PYTHON_BIN}" "${SCRIPT_DIR}/apply_postgres_schema.py"
+  if [[ -n "${SCHEMA_PROXY_PID}" ]]; then
+    kill "${SCHEMA_PROXY_PID}" >/dev/null 2>&1 || true
+  fi
+  trap - EXIT
 fi
 
 gcloud builds submit --tag "${IMAGE}" "${REPO_ROOT}"
