@@ -520,7 +520,9 @@ class AIService:
     ) -> str:
         normalized = preferred.lower()
         excluded = {provider.lower() for provider in (exclude or set())}
-        if normalized != "vertex_ai" and normalized not in excluded:
+        if normalized == "vertex_ai":
+            return normalized
+        if normalized not in excluded:
             return normalized
 
         for candidate in self._configured_tool_providers():
@@ -726,6 +728,13 @@ class AIService:
     def _coerce_tool_arguments(self, arguments: Any) -> Any:
         if arguments is None:
             return {}
+        if isinstance(arguments, dict):
+            return arguments
+        if hasattr(arguments, "items"):
+            try:
+                return dict(arguments.items())
+            except Exception:
+                pass
         if isinstance(arguments, str):
             stripped = arguments.strip()
             if not stripped:
@@ -734,7 +743,10 @@ class AIService:
                 return json.loads(stripped)
             except ValueError:
                 return arguments
-        return arguments
+        try:
+            return dict(arguments)
+        except Exception:
+            return arguments
 
     def _tool_names_from_descriptors(self, tools: list[dict[str, Any]] | None) -> list[str]:
         if not tools:
@@ -1065,6 +1077,68 @@ class AIService:
         data = response.json()
         return data["message"]["content"]
 
+    def _vertex_ai_tool_declarations(self, tools: list[dict[str, Any]] | None) -> list[Any]:
+        if not tools:
+            return []
+
+        declarations: list[Any] = []
+        for tool in tools:
+            declaration = self._vertex_ai_function_declaration(tool)
+            if declaration is not None:
+                declarations.append(declaration)
+        return declarations
+
+    def _vertex_ai_function_declaration(self, descriptor: Any) -> Any | None:
+        if not isinstance(descriptor, dict):
+            return None
+
+        function = descriptor.get("function")
+        if isinstance(function, dict):
+            descriptor = function
+
+        name = descriptor.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return None
+
+        parameters = descriptor.get("parameters")
+        if not isinstance(parameters, dict) or not parameters:
+            parameters = {"type": "object", "properties": {}}
+
+        description = descriptor.get("description")
+        if not isinstance(description, str) or not description.strip():
+            description = None
+
+        from vertexai.generative_models import FunctionDeclaration
+
+        return FunctionDeclaration(
+            name=name.strip(),
+            description=description,
+            parameters=parameters,
+        )
+
+    def _vertex_ai_tool_calls_from_response(self, response: Any) -> list[dict[str, Any]]:
+        raw_calls = getattr(response, "function_calls", None)
+        if not raw_calls:
+            candidates = getattr(response, "candidates", None) or []
+            if candidates:
+                raw_calls = getattr(candidates[0], "function_calls", None)
+        if not raw_calls:
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for function_call in raw_calls:
+            name = getattr(function_call, "name", None)
+            if not name:
+                continue
+            arguments = getattr(function_call, "args", None)
+            normalized.append(
+                {
+                    "name": str(name),
+                    "arguments": self._coerce_tool_arguments(arguments),
+                }
+            )
+        return normalized
+
     async def _generate_vertex_ai(
         self,
         message: str,
@@ -1074,124 +1148,78 @@ class AIService:
     ) -> str:
         if aiplatform is None or google_auth is None:
             return "Vertex AI SDK not found. Please install google-cloud-aiplatform."
-        
+
         if not (settings.VERTEX_AI_PROJECT_ID and settings.VERTEX_AI_LOCATION and settings.VERTEX_AI_MODEL_ID):
             return "Vertex AI not configured. Ensure VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, and VERTEX_AI_MODEL_ID are set."
 
         try:
-            # Attempt to authenticate using Application Default Credentials (ADC)
-            # or a service account key if VERTEX_AI_CREDENTIALS_PATH is provided.
             if settings.VERTEX_AI_CREDENTIALS_PATH:
-                credentials, project = google_auth.load_credentials_from_file(settings.VERTEX_AI_CREDENTIALS_PATH)
+                credentials, _ = google_auth.load_credentials_from_file(settings.VERTEX_AI_CREDENTIALS_PATH)
             else:
-                credentials, project = google_auth.default()
+                credentials, _ = google_auth.default()
 
-            aiplatform.init(project=settings.VERTEX_AI_PROJECT_ID, location=settings.VERTEX_AI_LOCATION, credentials=credentials)
-
-            # Vertex AI expects different model IDs and endpoint structures.
-            # For Generative AI models (like Gemini), you typically use the `VertexModel` class.
-            # The exact model ID might vary (e.g., "gemini-1.5-pro-preview-0514").
-            # The model needs to be deployed to an endpoint, or you use a pre-trained model.
-            # Assuming a deployed model for now. If it's a public model, the process might differ.
-
-            # For public models like Gemini, you might use VertexAI endpoint directly, not a deployed model.
-            # Example for Gemini Pro:
-            # from vertexai.generative_models import GenerativeModel, Part
-            # model = GenerativeModel("gemini-1.5-pro-preview-0514")
-
-            # If using a deployed model:
-            # model_endpoint = aiplatform.Endpoint.create(
-            #     display_name=settings.VERTEX_AI_MODEL_ID.replace("_", "-"), # Use a valid display name
-            #     project=settings.VERTEX_AI_PROJECT_ID,
-            #     location=settings.VERTEX_AI_LOCATION,
-            #     # You might need to specify the model resource name here if creating an endpoint.
-            # )
-
-            # For this example, let's assume we are interacting with a Vertex AI Model object directly
-            # or a deployed endpoint. The exact SDK usage depends on how the model is provisioned in Vertex AI.
-            # A common pattern for foundation models is to use vertexai.generative_models.GenerativeModel
-            # which doesn't require explicit deployment for public models.
-
-            # Check if settings.VERTEX_AI_MODEL_ID refers to a public model name or a deployed endpoint ID.
-            # For now, assuming it's a public model name (like 'gemini-1.5-pro-preview-0514').
-            
-            # Note: The exact way to instantiate and call models in Vertex AI can be complex and depends
-            # on whether it's a public foundation model or a custom-deployed model.
-            # This is a placeholder implementation.
-
-            # If using public foundation models (like Gemini):
-            from vertexai.generative_models import Content, GenerativeModel, Part
-            model = GenerativeModel(
-                settings.VERTEX_AI_MODEL_ID,
-                safety_settings=self._vertex_ai_safety_settings(),
+            aiplatform.init(
+                project=settings.VERTEX_AI_PROJECT_ID,
+                location=settings.VERTEX_AI_LOCATION,
+                credentials=credentials,
             )
 
-            # Constructing the history for Vertex AI
-            # Vertex AI's chat history format might differ slightly.
-            # Typically, it involves roles like "user" and "model".
-            # The system prompt might be handled differently (e.g., as part of the first user message or a separate config).
-            
-            # A simplified approach: prepend system prompt to user message if model supports it.
-            # For Generative models, history is usually a list of 'contents' or 'parts'.
+            from vertexai.generative_models import Content, GenerativeModel, Part, Tool
+
+            tool_declarations = self._vertex_ai_tool_declarations(
+                request_context.tools if request_context else None,
+            )
+            model_kwargs: dict[str, Any] = {
+                "safety_settings": self._vertex_ai_safety_settings(),
+            }
+            if tool_declarations:
+                model_kwargs["tools"] = [Tool(function_declarations=tool_declarations)]
+
+            model = GenerativeModel(settings.VERTEX_AI_MODEL_ID, **model_kwargs)
+
             vertex_history: list[Content] = []
             effective_system_prompt = system_prompt or self._build_system_prompt()
             if effective_system_prompt:
-                vertex_history.append(
-                    Content(role="user", parts=[Part.from_text(effective_system_prompt)])
-                )
+                vertex_history.append(Content(role="user", parts=[Part.from_text(effective_system_prompt)]))
             for turn in history:
                 role = turn["role"]
                 content = turn["content"]
-                if role == "system": # Handle system prompt if applicable to the model's input format
-                    vertex_history.append(
-                        Content(role="user", parts=[Part.from_text(content)])
-                    )
+                if role == "system":
+                    vertex_history.append(Content(role="user", parts=[Part.from_text(content)]))
                 elif role == "user":
-                    vertex_history.append(
-                        Content(role="user", parts=[Part.from_text(content)])
-                    )
-                elif role == "assistant": # 'assistant' is often mapped to 'model' in other APIs
-                    vertex_history.append(
-                        Content(role="model", parts=[Part.from_text(content)])
-                    )
+                    vertex_history.append(Content(role="user", parts=[Part.from_text(content)]))
+                elif role == "assistant":
+                    vertex_history.append(Content(role="model", parts=[Part.from_text(content)]))
 
-            # Prepend system prompt if the model expects it as part of the input
-            # Gemini often handles system instructions during model instantiation or as a separate argument.
-            # For this example, we will include it in the first user message if no history, or as a separate system_instruction if available.
-            # A more robust implementation would check the specific model's API.
-
-            # Let's try a common pattern: passing history directly and the system prompt might be handled by the model.
             chat_session = model.start_chat(
-                history=vertex_history or None, # Pass the constructed history
+                history=vertex_history or None,
                 response_validation=False,
-                # If the model supports system instructions directly:
-                # system_instruction="You are Orty, a concise and intelligent on-device assistant.",
             )
+            response = chat_session.send_message(message)
 
-            response = chat_session.send_message(message) # Send the current message
+            tool_calls = self._vertex_ai_tool_calls_from_response(response)
+            if tool_calls:
+                return json.dumps(
+                    {
+                        "reply": getattr(response, "text", "") or "",
+                        "tool_calls": tool_calls,
+                    }
+                )
 
-            # Extract the content from the response
-            # The structure of the response might vary. For Gemini, it's usually response.text
-            # Or response.candidates[0].content.parts[0].text
-            generated_text = ""
-            if response.text:
-                generated_text = response.text
-            else:
-                # Fallback for other potential response structures
+            generated_text = getattr(response, "text", "") or ""
+            if not generated_text and getattr(response, "candidates", None):
                 try:
-                    generated_text = response.text
-                except AttributeError:
-                    # Try to access parts if response.text is not directly available
-                    if hasattr(response, 'candidates') and response.candidates:
-                        for candidate in response.candidates:
-                            if candidate.content and candidate.content.parts:
-                                for part in candidate.content.parts:
-                                    if part.text:
-                                        generated_text += part.text
-                                        break # Assuming only one text part per candidate
-                                if generated_text:
-                                    break
-            
+                    candidate = response.candidates[0]
+                    content = candidate.content
+                    if getattr(content, "parts", None):
+                        for part in content.parts:
+                            part_text = getattr(part, "text", None)
+                            if part_text:
+                                generated_text = part_text
+                                break
+                except Exception:
+                    generated_text = ""
+
             if not generated_text:
                 return "Vertex AI error: Failed to extract text from response."
 

@@ -63,7 +63,7 @@ The next planned milestone is **D1: PostgreSQL-backed Cloud Run beta cutover**.
 
 The intended production artifact for server-hosted Orty is a versioned container image built from the official source repo and deployed with environment-specific config and secrets injected at runtime.
 
-Cloud Run beta target: `LLM_PROVIDER=vertex_ai` with no local Ollama dependency inside the container. PostgreSQL should be provided through `DATABASE_URL`, not SQLite on ephemeral disk.
+Cloud Run beta target: `LLM_PROVIDER=vertex_ai` with no local Ollama dependency inside the container. Tool-capable requests now stay on Vertex AI and surface normalized function-call payloads back to Alfred. PostgreSQL should be provided through `DATABASE_URL`, not SQLite on ephemeral disk.
 
 ---
 

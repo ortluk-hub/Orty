@@ -2,6 +2,7 @@
 
 ### Added
 - Added a PostgreSQL Phase 1 storage seam with `DATABASE_URL` runtime selection, a canonical `postgres_schema_phase1.sql`, and initial adapter coverage for auth/chat-history/bug-report durability while preserving SQLite as the default dev/test path.
+- Added Vertex AI tool-calling support on the Cloud Run path so structured tool requests stay on `vertex_ai` and return normalized tool-call payloads instead of routing around to Ollama.
 - Added Postgres-capable memory repository coverage for `memory_records` and `memory_summaries`, plus an opt-in test harness path (`ORTY_TEST_DATABASE_URL`) for running the existing auth/memory/bug API slice against a real PostgreSQL instance.
 - Added Alfred memory sync compatibility endpoints at `POST /memory/sync` and `POST /v1/memory/sync`, with canonical sync snapshots backed by `memory_records` rows keyed by `external_key`.
 - Added sync-aware memory repository operations for upsert-by-external-key, canonical listing, and soft deletion of sync-managed records removed from the latest Alfred snapshot.

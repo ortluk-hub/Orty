@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import types
 import json
 from types import SimpleNamespace
 
@@ -48,6 +50,42 @@ def test_generate_uses_openai_provider_when_explicitly_selected(monkeypatch):
     assert result == "openai-reply"
 
 
+def test_generate_keeps_vertex_ai_when_tools_are_present(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "vertex_ai")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
+
+    async def fake_vertex(message, history, system_prompt=None, request_context=None):
+        return "vertex-reply"
+
+    async def fake_ollama(message, history, system_prompt=None, request_context=None):
+        return "ollama-reply"
+
+    service.register_provider("vertex_ai", fake_vertex)
+    service.register_provider("ollama", fake_ollama)
+
+    result = asyncio.run(
+        service.generate(
+            "hello",
+            request_context=ChatRequestContext(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "alfred.navigate_to",
+                            "description": "Navigate to a saved place",
+                        },
+                    }
+                ],
+                tool_choice="auto",
+            ),
+        )
+    )
+
+    assert result == "vertex-reply"
+
+
 def test_generate_returns_clear_message_for_unsupported_provider(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "anthropic")
@@ -74,6 +112,122 @@ def test_generate_can_use_registered_custom_provider(monkeypatch):
     result = asyncio.run(service.generate("hello", history=[{"role": "user", "content": "x"}]))
 
     assert result == "mock:hello:1"
+
+
+def test_generate_vertex_ai_can_return_tool_calls(monkeypatch):
+    service = AIService()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "vertex_ai")
+    monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
+    monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
+    monkeypatch.setattr(settings, "VERTEX_AI_PROJECT_ID", "test-project")
+    monkeypatch.setattr(settings, "VERTEX_AI_LOCATION", "us-central1")
+    monkeypatch.setattr(settings, "VERTEX_AI_MODEL_ID", "gemini-2.5-flash")
+
+    fake_vertexai = types.ModuleType("vertexai")
+    fake_generative_models = types.ModuleType("vertexai.generative_models")
+
+    class FakePart:
+        @staticmethod
+        def from_text(text):
+            return {"text": text}
+
+    class FakeContent:
+        def __init__(self, role=None, parts=None):
+            self.role = role
+            self.parts = parts or []
+
+    class FakeFunctionDeclaration:
+        def __init__(self, name, description=None, parameters=None):
+            self.name = name
+            self.description = description
+            self.parameters = parameters
+
+    class FakeTool:
+        def __init__(self, function_declarations):
+            self.function_declarations = function_declarations
+
+    class FakeResponse:
+        text = ""
+        function_calls = [types.SimpleNamespace(name="alfred.navigate_to", args={"destination": "home"})]
+
+    class FakeChatSession:
+        def __init__(self, history):
+            self.history = history
+
+        def send_message(self, message):
+            self.message = message
+            return FakeResponse()
+
+    class FakeGenerativeModel:
+        last_instance = None
+
+        def __init__(self, model_name, **kwargs):
+            self.model_name = model_name
+            self.kwargs = kwargs
+            self.history = None
+            FakeGenerativeModel.last_instance = self
+
+        def start_chat(self, history=None, response_validation=False):
+            self.history = history
+            self.response_validation = response_validation
+            return FakeChatSession(history)
+
+    fake_generative_models.Content = FakeContent
+    fake_generative_models.FunctionDeclaration = FakeFunctionDeclaration
+    fake_generative_models.GenerativeModel = FakeGenerativeModel
+    fake_generative_models.Part = FakePart
+    fake_generative_models.Tool = FakeTool
+    fake_vertexai.generative_models = fake_generative_models
+
+    monkeypatch.setitem(sys.modules, "vertexai", fake_vertexai)
+    monkeypatch.setitem(sys.modules, "vertexai.generative_models", fake_generative_models)
+
+    monkeypatch.setattr(
+        "service.ai.aiplatform",
+        types.SimpleNamespace(init=lambda **kwargs: None),
+    )
+    monkeypatch.setattr(
+        "service.ai.google_auth",
+        types.SimpleNamespace(
+            default=lambda: (object(), "test-project"),
+            load_credentials_from_file=lambda path: (object(), "test-project"),
+            exceptions=types.SimpleNamespace(DefaultCredentialsError=Exception),
+        ),
+    )
+    monkeypatch.setattr(service, "_vertex_ai_safety_settings", lambda: [])
+
+    result = asyncio.run(
+        service._generate_vertex_ai(
+            "navigate home",
+            history=[],
+            request_context=ChatRequestContext(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "alfred.navigate_to",
+                            "description": "Navigate to a saved place",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "destination": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                ]
+            ),
+        )
+    )
+
+    assert FakeGenerativeModel.last_instance is not None
+    assert FakeGenerativeModel.last_instance.kwargs["tools"][0].function_declarations[0].name == "alfred.navigate_to"
+    assert json.loads(result) == {
+        "reply": "",
+        "tool_calls": [
+            {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+        ],
+    }
 
 
 
@@ -277,17 +431,16 @@ def test_generate_with_meta_parses_fenced_structured_tool_calls(monkeypatch):
     ]
 
 
-def test_generate_with_meta_routes_tool_requests_away_from_vertex_ai(monkeypatch):
+def test_generate_with_meta_keeps_vertex_ai_for_tool_requests(monkeypatch):
     service = AIService()
     monkeypatch.setattr(settings, "LLM_PROVIDER", "vertex_ai")
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(settings, "ENABLE_CLOUD_FALLBACK", False)
     monkeypatch.setattr(settings, "ENABLE_PARALLEL_PROVIDER_RACE", False)
 
     called: dict[str, bool] = {}
 
-    async def fake_openai(message, history, system_prompt=None, request_context=None):
-        called["openai"] = True
+    async def fake_vertex(message, history, system_prompt=None, request_context=None):
+        called["vertex"] = True
         return json.dumps(
             {
                 "reply": "",
@@ -300,8 +453,8 @@ def test_generate_with_meta_routes_tool_requests_away_from_vertex_ai(monkeypatch
             }
         )
 
-    async def fake_vertex(message, history, system_prompt=None, request_context=None):
-        raise AssertionError("vertex_ai should not be selected for tool requests")
+    async def fake_openai(message, history, system_prompt=None, request_context=None):
+        raise AssertionError("openai should not be selected for tool requests when vertex_ai is configured")
 
     service.register_provider("openai", fake_openai)
     service.register_provider("vertex_ai", fake_vertex)
@@ -321,7 +474,7 @@ def test_generate_with_meta_routes_tool_requests_away_from_vertex_ai(monkeypatch
         )
     )
 
-    assert called["openai"] is True
+    assert called["vertex"] is True
     assert result["tool_calls"] == [
         {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
     ]
