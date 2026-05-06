@@ -433,7 +433,11 @@ def test_build_system_prompt_can_include_client_contract():
 
     assert "This request came through a managed client." in prompt
     assert "Presented assistant name for this client: Jane." in prompt
+    assert "The outward voice is the client persona supplied below, not Orty's server persona." in prompt
+    assert "Never answer creative or conversational requests by saying 'As Orty...'" in prompt
     assert "Always answer outwardly as Jane for Alfred Android." in prompt
+    assert "You are Orty, the server system and coordination layer" not in prompt
+    assert "When discussing the system, speak from the perspective of Orty the server" not in prompt
 
 
 def test_build_system_prompt_includes_client_tool_contract():

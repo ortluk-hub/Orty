@@ -30,6 +30,7 @@
 - Added an explicit `GET /ui/` route so trailing-slash UI requests are served directly without framework redirect hops.
 
 ### Fixed
+- Fixed managed-client prompt construction so Jane/assistant personas stay client-facing and no longer leak Orty's server identity into outward responses.
 - Fixed Vertex AI tool-call handling so tool-call-only responses no longer read `response.text` and can return normalized tool-call payloads without tripping a Vertex runtime error.
 - Fixed async supervisor test teardown by cancelling leftover bot tasks in isolated runtimes and removing default-executor usage from the code-review bot path, which was delaying event-loop shutdown after tests.
 - Removed `android-thin-client/gradle/wrapper/gradle-wrapper.jar` from version control to keep PRs free of binary artifacts.
