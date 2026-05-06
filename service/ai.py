@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any, NotRequired, TypedDict
+from uuid import uuid4
 
 import httpx
 
@@ -85,7 +86,9 @@ class GenerationResult(TypedDict):
     handled_by: str
     fallback_used: bool
     fallback_provider: str | None
+    tool_request_id: NotRequired[str]
     tool_calls: NotRequired[list[dict[str, Any]]]
+    tool_call_metadata: NotRequired[list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -185,6 +188,7 @@ class AIService:
         request_context: ChatRequestContext | None = None,
     ) -> GenerationResult:
         request_start = time.perf_counter()
+        tool_request_id = uuid4().hex
         provider = settings.LLM_PROVIDER.lower()
         history = history or []
         system_prompt = self._build_system_prompt(request_context=request_context)
@@ -214,7 +218,11 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return self._finalize_generation_result(result, request_context=request_context)
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         generator = self._providers.get(provider)
         if generator is None:
@@ -233,7 +241,11 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return self._finalize_generation_result(result, request_context=request_context)
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         fallback_provider = settings.CLOUD_FALLBACK_PROVIDER.lower()
         if request_context and request_context.tools:
@@ -267,7 +279,11 @@ class AIService:
                 fallback_used=race_result["fallback_used"],
                 request_start=request_start,
             )
-            return self._finalize_generation_result(race_result, request_context=request_context)
+            return self._finalize_generation_result(
+                race_result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         primary_reply, _ = await self._timed_provider_call(
             provider=provider,
@@ -293,7 +309,11 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return self._finalize_generation_result(result, request_context=request_context)
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         if fallback_generator is None:
             result = {
@@ -310,7 +330,11 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return self._finalize_generation_result(result, request_context=request_context)
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         fallback_reply, _ = await self._timed_provider_call(
             provider=fallback_provider,
@@ -341,7 +365,11 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return self._finalize_generation_result(result, request_context=request_context)
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
         result = {
             "reply": fallback_reply,
             "provider": fallback_provider,
@@ -356,7 +384,11 @@ class AIService:
             fallback_used=True,
             request_start=request_start,
         )
-        return self._finalize_generation_result(result, request_context=request_context)
+        return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
     async def _maybe_generate_with_race(
         self,
@@ -631,6 +663,7 @@ class AIService:
         result: GenerationResult,
         *,
         request_context: ChatRequestContext | None = None,
+        tool_request_id: str | None = None,
     ) -> GenerationResult:
         reply, tool_calls = self._extract_structured_reply(
             result["reply"],
@@ -639,7 +672,40 @@ class AIService:
         finalized = dict(result)
         finalized["reply"] = reply
         finalized["tool_calls"] = tool_calls
+        if tool_calls:
+            effective_tool_request_id = tool_request_id or uuid4().hex
+            finalized["tool_request_id"] = effective_tool_request_id
+            finalized["tool_call_metadata"] = self._build_tool_call_metadata(
+                tool_calls,
+                tool_request_id=effective_tool_request_id,
+                provider=result.get("provider"),
+                handled_by=result.get("handled_by"),
+            )
         return finalized
+
+    def _build_tool_call_metadata(
+        self,
+        tool_calls: list[dict[str, Any]],
+        *,
+        tool_request_id: str,
+        provider: str | None,
+        handled_by: str | None,
+    ) -> list[dict[str, Any]]:
+        metadata: list[dict[str, Any]] = []
+        for index, tool_call in enumerate(tool_calls):
+            metadata.append(
+                {
+                    "tool_request_id": tool_request_id,
+                    "tool_call_id": f"{tool_request_id}:{index}",
+                    "index": index,
+                    "name": tool_call.get("name"),
+                    "arguments": tool_call.get("arguments"),
+                    "provider": provider,
+                    "handled_by": handled_by,
+                    "requires_response": True,
+                }
+            )
+        return metadata
 
     def _extract_structured_reply(
         self,

@@ -47,6 +47,8 @@ async def chat(payload: ChatRequest, request: Request, auth: dict = Depends(get_
     )
     reply = generated["reply"]
     tool_calls = generated.get("tool_calls") or []
+    tool_request_id = generated.get("tool_request_id")
+    tool_call_metadata = generated.get("tool_call_metadata") or []
 
     if payload.persist:
         runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=client_id)
@@ -70,6 +72,8 @@ async def chat(payload: ChatRequest, request: Request, auth: dict = Depends(get_
         conversation_id=conversation_id,
         used_history=len(history),
         tool_calls=tool_calls,
+        tool_request_id=tool_request_id,
+        tool_call_metadata=tool_call_metadata,
         handled_by=generated.get("handled_by"),
         provider=generated.get("provider"),
         fallback_used=bool(generated.get("fallback_used", False)),

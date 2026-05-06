@@ -435,6 +435,19 @@ def test_chat_passes_rich_tool_contract_and_returns_tool_calls(monkeypatch):
             "handled_by": "cloud-primary",
             "fallback_used": False,
             "fallback_provider": None,
+            "tool_request_id": "req-123",
+            "tool_call_metadata": [
+                {
+                    "tool_request_id": "req-123",
+                    "tool_call_id": "req-123:0",
+                    "index": 0,
+                    "name": "alfred.navigate_to",
+                    "arguments": {"destination": "home"},
+                    "provider": "openai",
+                    "handled_by": "cloud-primary",
+                    "requires_response": True,
+                }
+            ],
             "tool_calls": [
                 {
                     "name": "alfred.navigate_to",
@@ -465,6 +478,19 @@ def test_chat_passes_rich_tool_contract_and_returns_tool_calls(monkeypatch):
     body = response.json()
     assert body["tool_calls"] == [
         {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
+    assert body["tool_request_id"] == "req-123"
+    assert body["tool_call_metadata"] == [
+        {
+            "tool_request_id": "req-123",
+            "tool_call_id": "req-123:0",
+            "index": 0,
+            "name": "alfred.navigate_to",
+            "arguments": {"destination": "home"},
+            "provider": "openai",
+            "handled_by": "cloud-primary",
+            "requires_response": True,
+        }
     ]
     assert captured["message"] == "Take me home."
     assert captured["request_context"].tools[0]["function"]["name"] == "alfred.navigate_to"

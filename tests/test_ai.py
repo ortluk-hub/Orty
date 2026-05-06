@@ -225,12 +225,11 @@ def test_generate_vertex_ai_can_return_tool_calls(monkeypatch):
 
     assert FakeGenerativeModel.last_instance is not None
     assert FakeGenerativeModel.last_instance.kwargs["tools"][0].function_declarations[0].name == "alfred.navigate_to"
-    assert json.loads(result) == {
-        "reply": "",
-        "tool_calls": [
-            {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
-        ],
-    }
+    parsed = json.loads(result)
+    assert parsed["reply"] == ""
+    assert parsed["tool_calls"] == [
+        {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
 
 
 def test_generate_vertex_ai_can_return_tool_calls(monkeypatch):
@@ -341,12 +340,11 @@ def test_generate_vertex_ai_can_return_tool_calls(monkeypatch):
 
     assert FakeGenerativeModel.last_instance is not None
     assert FakeGenerativeModel.last_instance.kwargs["tools"][0].function_declarations[0].name == "alfred.navigate_to"
-    assert json.loads(result) == {
-        "reply": "",
-        "tool_calls": [
-            {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
-        ],
-    }
+    parsed = json.loads(result)
+    assert parsed["reply"] == ""
+    assert parsed["tool_calls"] == [
+        {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
+    ]
 
 
 
@@ -506,6 +504,8 @@ def test_generate_with_meta_parses_structured_tool_calls(monkeypatch):
     assert result["tool_calls"] == [
         {"name": "alfred.navigate_to", "arguments": {"destination": "home"}}
     ]
+    assert result["tool_request_id"]
+    assert result["tool_call_metadata"][0]["tool_call_id"] == f"{result["tool_request_id"]}:0"
 
 
 def test_generate_with_meta_parses_fenced_structured_tool_calls(monkeypatch):

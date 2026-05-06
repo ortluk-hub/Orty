@@ -42,6 +42,8 @@ class ChatResponse(BaseModel):
     conversation_id: str
     used_history: int = 0
     tool_calls: list[ChatToolCall] = Field(default_factory=list)
+    tool_request_id: str | None = None
+    tool_call_metadata: list[dict[str, Any]] = Field(default_factory=list)
     handled_by: str | None = None
     provider: str | None = None
     fallback_used: bool = False
