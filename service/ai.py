@@ -1201,7 +1201,7 @@ class AIService:
             if tool_calls:
                 return json.dumps(
                     {
-                        "reply": getattr(response, "text", "") or "",
+                        "reply": "",
                         "tool_calls": tool_calls,
                     }
                 )
