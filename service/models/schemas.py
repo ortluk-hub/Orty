@@ -231,6 +231,20 @@ class ModelRegistryItemResponse(BaseModel):
     is_default: bool = False
 
 
+class ModelPublicUrlTemplateRequest(BaseModel):
+    public_url_template: str | None = Field(default=None, max_length=2000)
+
+
+class ModelPublicUrlTemplateResponse(BaseModel):
+    public_url_template: str | None = None
+
+
+class ModelDownloadLinkResponse(BaseModel):
+    model_id: str
+    download_url: str
+    filename: str | None = None
+
+
 class MemoryRecordCreateRequest(BaseModel):
     client_id: str | None = None
     memory_type: str = Field(min_length=1, max_length=100)

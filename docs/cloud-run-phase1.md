@@ -39,10 +39,11 @@ This deployment path assumes:
 - Vertex AI credentials come from the Cloud Run service account, not a local model process inside the container
 - `ORTY_SHARED_SECRET` is stored in Secret Manager
 - `ORTY_ADMIN_SECRET` is stored in Secret Manager and gates the model upload endpoint
+- `/v1/admin/models/download-link` is public and returns the configured public LiteRT/TFLite model URL; it does not require the admin secret
 - `ORTY_ALFRED_CLIENT_KEY` is set as a Cloud Run environment variable for Alfred client registration
 - Cloud Run is configured for HTTP/2 end-to-end so streaming and model download traffic stay on the h2c path
 - The container entrypoint uses an h2c-capable ASGI server (`Hypercorn`); plain `uvicorn` will 502 under Cloud Run HTTP/2
-- A Cloud Storage bucket is mounted at `/models` so GGUF uploads persist without rebuilding the container
+- A Cloud Storage bucket is mounted at `/models` so uploaded model artifacts and registry metadata persist without rebuilding the container
 - The default deploy script provisions `gs://ortypublic-models` for the mounted model volume
 - `/v1/bots` remains disabled on Cloud Run
 

@@ -223,8 +223,11 @@ SQLITE_TIMEOUT_SECONDS=5
 ALLOW_LEGACY_CLIENT_HEADERS=true
 ORTY_ADMIN_SECRET=your_model_upload_secret_here
 ORTY_MODEL_STORAGE_ROOT=/models
-# optional default registry hint if the mounted bucket contains multiple GGUF files
-# ORTY_DEFAULT_MODEL_ID=llama-3-8b-instruct-q4_k_m.gguf
+# Optional template for public model download URLs returned to Alfred.
+# Example: https://storage.googleapis.com/your-model-bucket/{model_id}
+ORTY_MODEL_PUBLIC_URL_TEMPLATE=https://example.invalid/models/{model_id}
+# optional default registry hint if the mounted bucket contains multiple public TFLite model entries
+# ORTY_DEFAULT_MODEL_ID=Qwen2.5-0.5B-Instruct_seq128_q8_ekv1280.tflite
 ```
 
 `ORTY_SHARED_SECRET` is required for admin endpoints (`/v1/clients`, admin introspection/override flows).
@@ -271,6 +274,8 @@ Orty now has a deployment profile intended for the first Cloud Run cutover of th
 - Use this profile for the public chat/auth/STT/TTS path only.
 - Keep Codey and supervisor-style bot orchestration on separate infrastructure for now.
 - This phase does **not** solve durable storage yet. `SQLITE_PATH` still points to SQLite, so a plain Cloud Run deploy should be treated as staging or smoke infrastructure until storage is migrated off the container filesystem.
+
+For public model delivery, configure `ORTY_MODEL_PUBLIC_URL_TEMPLATE` to point at the external host that actually serves the LiteRT/TFLite model bytes. The `/v1/admin/models/download-link` endpoint is public and returns that URL, and Alfred downloads directly from that host so Cloud Run never proxies the model file.
 
 See `docs/cloud-run-phase1.md` for the rollout order and `scripts/deploy_cloud_run_phase1.sh` for a starting deploy command.
 

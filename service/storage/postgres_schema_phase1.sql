@@ -68,6 +68,12 @@ ON client_access_tokens (client_id);
 CREATE INDEX IF NOT EXISTS idx_client_access_tokens_expires_at
 ON client_access_tokens (expires_at);
 
+CREATE TABLE IF NOT EXISTS model_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     client_id TEXT REFERENCES clients(client_id) ON DELETE SET NULL,

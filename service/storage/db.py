@@ -249,6 +249,15 @@ class SQLiteDB(Database):
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS model_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS memory_records (
                     record_id TEXT PRIMARY KEY,
                     client_id TEXT NOT NULL,

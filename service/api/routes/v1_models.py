@@ -6,10 +6,14 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from service.api.deps import get_runtime
 from service.config import settings
+from service.models.schemas import ModelDownloadLinkResponse
+from service.models.schemas import ModelPublicUrlTemplateRequest
+from service.models.schemas import ModelPublicUrlTemplateResponse
 from service.models.schemas import ModelRegistryItemResponse
 
 
@@ -18,9 +22,10 @@ logger = logging.getLogger("orty.models")
 router = APIRouter(prefix="/v1/models", tags=["v1-models"])
 admin_router = APIRouter(prefix="/v1/admin/models", tags=["v1-models"])
 
-MODEL_SUFFIX = ".gguf"
+ALLOWED_MODEL_SUFFIXES = (".task", ".litertlm", ".tflite", ".gguf")
 REGISTRY_FILENAME = "registry.json"
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+MODEL_SETTING_PUBLIC_URL_TEMPLATE = "public_url_template"
 
 
 def _model_root() -> Path:
@@ -38,11 +43,15 @@ def _registry_path(root: Path) -> Path:
     return root / REGISTRY_FILENAME
 
 
+def _has_allowed_model_suffix(model_id: str) -> bool:
+    return any(model_id.endswith(suffix) for suffix in ALLOWED_MODEL_SUFFIXES)
+
+
 def _is_valid_model_id(model_id: str) -> bool:
     candidate = model_id.strip()
     return bool(
         candidate
-        and candidate.endswith(MODEL_SUFFIX)
+        and _has_allowed_model_suffix(candidate)
         and len(candidate) <= 255
         and candidate == Path(candidate).name
         and "/" not in candidate
@@ -50,7 +59,6 @@ def _is_valid_model_id(model_id: str) -> bool:
         and candidate not in {".", ".."}
         and not candidate.startswith(".")
     )
-
 
 def _validate_model_id(model_id: str) -> str:
     candidate = model_id.strip()
@@ -60,7 +68,7 @@ def _validate_model_id(model_id: str) -> str:
 
 
 def _default_model_name(model_id: str) -> str:
-    base_name = model_id[: -len(MODEL_SUFFIX)]
+    base_name = Path(model_id).stem
     friendly = base_name.replace("-", " ").replace("_", " ").strip()
     return friendly.title() if friendly else model_id
 
@@ -125,6 +133,34 @@ def _build_entry_from_file(
     }
 
 
+def _has_public_download_reference(raw_entry: dict[str, Any]) -> bool:
+    for key in ('download_url', 'downloadUrl', 'public_url', 'publicUrl', 'url'):
+        candidate = raw_entry.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            return True
+    return False
+
+
+def _build_entry_from_registry_entry(
+    raw_entry: dict[str, Any],
+    *,
+    is_default: bool = False,
+) -> dict[str, Any]:
+    model_id = str(raw_entry.get('id', '')).strip()
+    name_value = raw_entry.get('name')
+    resolved_name = name_value.strip() if isinstance(name_value, str) and name_value.strip() else _default_model_name(model_id)
+    resolved_size = _coerce_int(raw_entry.get('size_bytes')) or 0
+    sha_value = raw_entry.get('sha256')
+    resolved_sha = sha_value.strip() if isinstance(sha_value, str) else ''
+    return {
+        'id': model_id,
+        'name': resolved_name,
+        'size_bytes': resolved_size,
+        'sha256': resolved_sha,
+        'is_default': is_default,
+    }
+
+
 def _choose_default_model_id(entries: list[dict[str, Any]], registry_default_id: str | None) -> str | None:
     if registry_default_id and any(entry["id"] == registry_default_id for entry in entries):
         return registry_default_id
@@ -172,26 +208,33 @@ def _list_model_entries(root: Path) -> list[dict[str, Any]]:
             if not _is_valid_model_id(model_id):
                 continue
             path = root / model_id
-            if not path.is_file():
+            if path.is_file():
+                entry = _build_entry_from_file(
+                    path,
+                    name=raw_entry.get('name') if isinstance(raw_entry.get('name'), str) else None,
+                    sha256=raw_entry.get('sha256') if isinstance(raw_entry.get('sha256'), str) else None,
+                    size_bytes=_coerce_int(raw_entry.get('size_bytes')),
+                    is_default=bool(raw_entry.get('is_default')) or model_id == registry_default_id,
+                )
+            elif _has_public_download_reference(raw_entry):
+                entry = _build_entry_from_registry_entry(
+                    raw_entry,
+                    is_default=bool(raw_entry.get('is_default')) or model_id == registry_default_id,
+                )
+            else:
                 continue
-            entry = _build_entry_from_file(
-                path,
-                name=raw_entry.get("name") if isinstance(raw_entry.get("name"), str) else None,
-                sha256=raw_entry.get("sha256") if isinstance(raw_entry.get("sha256"), str) else None,
-                size_bytes=_coerce_int(raw_entry.get("size_bytes")),
-                is_default=bool(raw_entry.get("is_default")) or model_id == registry_default_id,
-            )
             entries_by_id[model_id] = entry
 
     if root.is_dir():
-        for path in sorted(root.glob(f"*{MODEL_SUFFIX}")):
-            model_id = path.name
-            if model_id in entries_by_id:
-                continue
-            entries_by_id[model_id] = _build_entry_from_file(
-                path,
-                is_default=model_id == registry_default_id,
-            )
+        for suffix in ALLOWED_MODEL_SUFFIXES:
+            for path in sorted(root.glob(f"*{suffix}")):
+                model_id = path.name
+                if model_id in entries_by_id:
+                    continue
+                entries_by_id[model_id] = _build_entry_from_file(
+                    path,
+                    is_default=model_id == registry_default_id,
+                )
 
     entries = _sort_model_entries(list(entries_by_id.values()))
     default_model_id = _choose_default_model_id(entries, registry_default_id)
@@ -219,10 +262,125 @@ def _resolve_download_path(root: Path, model_id: str) -> Path:
     return candidate
 
 
+def _get_public_url_template(request: Request) -> str | None:
+    runtime = get_runtime(request)
+    with runtime.db.connect() as conn:
+        row = conn.execute(
+            "SELECT setting_value FROM model_settings WHERE setting_key = ?",
+            (MODEL_SETTING_PUBLIC_URL_TEMPLATE,),
+        ).fetchone()
+    if not row:
+        return None
+    value = str(row["setting_value"] or "").strip()
+    return value or None
+
+
+def _set_public_url_template(request: Request, template: str | None) -> None:
+    runtime = get_runtime(request)
+    normalized = template.strip() if isinstance(template, str) else ""
+    with runtime.db.connect() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM model_settings WHERE setting_key = ?",
+            (MODEL_SETTING_PUBLIC_URL_TEMPLATE,),
+        ).fetchone()
+        if normalized:
+            if existing:
+                conn.execute(
+                    "UPDATE model_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = ?",
+                    (normalized, MODEL_SETTING_PUBLIC_URL_TEMPLATE),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO model_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                    (MODEL_SETTING_PUBLIC_URL_TEMPLATE, normalized),
+                )
+        else:
+            conn.execute(
+                "DELETE FROM model_settings WHERE setting_key = ?",
+                (MODEL_SETTING_PUBLIC_URL_TEMPLATE,),
+            )
+
+
+def _format_public_url_template(template: str, *, model_id: str, root: Path) -> str:
+    try:
+        candidate = template.format(model_id=model_id, filename=model_id, root=str(root))
+    except KeyError as exc:
+        raise HTTPException(status_code=500, detail="Invalid public URL template") from exc
+    candidate = candidate.strip()
+    if not candidate:
+        raise HTTPException(status_code=500, detail="Public URL template resolved to an empty URL")
+    return candidate
+
+
+
+
+def _resolve_public_download_url(request: Request, root: Path, model_id: str) -> str:
+    payload = _load_registry_payload(root)
+    raw_models = payload.get("models", [])
+    if isinstance(raw_models, list):
+        for raw_entry in raw_models:
+            if not isinstance(raw_entry, dict):
+                continue
+            if str(raw_entry.get("id", "")).strip() != model_id:
+                continue
+            for key in ("download_url", "downloadUrl", "public_url", "publicUrl", "url"):
+                candidate = raw_entry.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            break
+
+    sql_template = _get_public_url_template(request)
+    if sql_template:
+        return _format_public_url_template(sql_template, model_id=model_id, root=root)
+
+    template = (settings.ORTY_MODEL_PUBLIC_URL_TEMPLATE or "").strip()
+    if template:
+        return _format_public_url_template(template, model_id=model_id, root=root)
+
+    raise HTTPException(status_code=503, detail="Public model download is not configured")
+
 @router.get("", response_model=list[ModelRegistryItemResponse])
 async def list_models() -> list[ModelRegistryItemResponse]:
     root = _model_root()
     return [ModelRegistryItemResponse(**entry) for entry in _list_model_entries(root)]
+
+
+@admin_router.get('/download-link', response_model=ModelDownloadLinkResponse)
+async def get_model_download_link(
+    request: Request,
+    model_id: str = Query(..., min_length=1, max_length=255),
+) -> ModelDownloadLinkResponse:
+    requested_model_id = model_id.strip()
+    if not requested_model_id:
+        raise HTTPException(status_code=400, detail='Invalid model_id')
+    normalized_model_id = _validate_model_id(requested_model_id)
+    root = _model_root()
+    download_url = _resolve_public_download_url(request, root, normalized_model_id)
+    return ModelDownloadLinkResponse(
+        model_id=normalized_model_id,
+        download_url=download_url,
+        filename=normalized_model_id,
+    )
+
+
+@admin_router.get("/public-url-template", response_model=ModelPublicUrlTemplateResponse)
+async def get_public_url_template(
+    request: Request,
+    x_orty_admin_secret: str | None = Header(default=None, alias="x-orty-admin-secret"),
+) -> ModelPublicUrlTemplateResponse:
+    _require_admin_secret(x_orty_admin_secret)
+    return ModelPublicUrlTemplateResponse(public_url_template=_get_public_url_template(request))
+
+
+@admin_router.put("/public-url-template", response_model=ModelPublicUrlTemplateResponse)
+async def set_public_url_template(
+    payload: ModelPublicUrlTemplateRequest,
+    request: Request,
+    x_orty_admin_secret: str | None = Header(default=None, alias="x-orty-admin-secret"),
+) -> ModelPublicUrlTemplateResponse:
+    _require_admin_secret(x_orty_admin_secret)
+    _set_public_url_template(request, payload.public_url_template)
+    return ModelPublicUrlTemplateResponse(public_url_template=_get_public_url_template(request))
 
 
 @router.get("/{model_id}/download")
