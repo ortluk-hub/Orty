@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from service.api.deps import get_runtime
+from service.api.voice_proxy import voice_proxy_gateway
 from service.api.routes.chat import router as chat_router
 from service.api.routes.health import router as health_router
 from service.api.routes.ui import root_router as ui_root_router
@@ -8,9 +9,14 @@ from service.api.routes.ui import router as ui_router
 from service.api.routes.v1_auth import router as v1_auth_router
 from service.api.routes.v1_bots import router as v1_bots_router
 from service.api.routes.v1_bug_reports import router as v1_bug_reports_router
+from service.api.routes.v1_bugs_conversational import router as v1_bugs_conv_router
 from service.api.routes.v1_clients import router as v1_clients_router
+from service.api.routes.v1_models import admin_router as v1_models_admin_router
+from service.api.routes.v1_models import router as v1_models_router
 from service.api.routes.v1_memory import router as v1_memory_router
 from service.api.routes.v1_memory import compat_router as memory_sync_compat_router
+from service.api.routes.v1_stt import router as v1_stt_router
+from service.api.routes.v1_tts import router as v1_tts_router
 
 def create_app() -> FastAPI:
     app = FastAPI(title='Orty AI Assistant')
@@ -25,15 +31,21 @@ def create_app() -> FastAPI:
         runtime = getattr(app.state, "runtime", None)
         if runtime is not None:
             await runtime.bot_runner.shutdown()
+        await voice_proxy_gateway.aclose()
 
     app.include_router(health_router)
     app.include_router(chat_router)
     app.include_router(v1_auth_router)
     app.include_router(v1_clients_router)
+    app.include_router(v1_models_router)
+    app.include_router(v1_models_admin_router)
     app.include_router(v1_bug_reports_router)
+    app.include_router(v1_bugs_conv_router)  # Conversational bug tools
     app.include_router(v1_memory_router)
     app.include_router(memory_sync_compat_router)
     app.include_router(v1_bots_router)
+    app.include_router(v1_stt_router)
+    app.include_router(v1_tts_router)
 
     app.include_router(ui_root_router)
     app.include_router(ui_router)

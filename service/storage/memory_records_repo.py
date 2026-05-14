@@ -1,14 +1,44 @@
 import json
+from datetime import datetime
 from uuid import uuid4
 
-from service.storage.db import SQLiteDB, utc_now_iso
+from service.storage.db import Database, utc_now_iso
 
 _UNSET = object()
 
 
 class MemoryRecordsRepository:
-    def __init__(self, db: SQLiteDB):
+    def __init__(self, db: Database):
         self.db = db
+
+    @staticmethod
+    def _encode_tags(tags: list[str] | None) -> str:
+        return json.dumps(tags or [])
+
+    @staticmethod
+    def _decode_tags(value) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return json.loads(value or "[]")
+
+    @staticmethod
+    def _normalize_timestamp(value) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    def _row_to_payload(self, row) -> dict:
+        payload = dict(row)
+        payload["tags"] = self._decode_tags(payload.pop("tags_json", None))
+        payload["is_pinned"] = bool(payload.get("is_pinned"))
+        payload["created_at"] = self._normalize_timestamp(payload.get("created_at"))
+        payload["updated_at"] = self._normalize_timestamp(payload.get("updated_at"))
+        payload["deleted_at"] = self._normalize_timestamp(payload.get("deleted_at"))
+        return payload
 
     def create_record(
         self,
@@ -44,11 +74,11 @@ class MemoryRecordsRepository:
                     memory_type,
                     content,
                     summary,
-                    json.dumps(tags),
+                    self._encode_tags(tags),
                     importance,
                     source,
                     external_key,
-                    1 if is_pinned else 0,
+                    bool(is_pinned),
                     expires_at,
                     source_created_at,
                     source_updated_at,
@@ -66,16 +96,11 @@ class MemoryRecordsRepository:
             ).fetchone()
         if not row:
             return None
-        payload = dict(row)
-        payload["tags"] = json.loads(payload.pop("tags_json") or "[]")
-        payload["is_pinned"] = bool(payload.get("is_pinned"))
-        return payload
+        return self._row_to_payload(row)
 
     def get_active_record(self, record_id: str) -> dict | None:
         record = self.get_record(record_id)
-        if not record:
-            return None
-        if record.get("deleted_at") is not None:
+        if not record or record.get("deleted_at") is not None:
             return None
         return record
 
@@ -89,7 +114,7 @@ class MemoryRecordsRepository:
         limit: int = 50,
     ) -> list[dict]:
         clauses = ["client_id = ?", "deleted_at IS NULL"]
-        params: list[str | int] = [client_id]
+        params: list[object] = [client_id]
 
         if memory_type:
             clauses.append("memory_type = ?")
@@ -97,6 +122,13 @@ class MemoryRecordsRepository:
         if source:
             clauses.append("source = ?")
             params.append(source)
+        if tag:
+            if getattr(self.db, "kind", None) == "postgres":
+                clauses.append("tags_json @> ?::jsonb")
+                params.append(json.dumps([tag]))
+            else:
+                clauses.append("EXISTS (SELECT 1 FROM json_each(memory_records.tags_json) WHERE value = ?)")
+                params.append(tag)
 
         query = "SELECT * FROM memory_records WHERE " + " AND ".join(clauses)
         query += " ORDER BY created_at DESC LIMIT ?"
@@ -105,14 +137,7 @@ class MemoryRecordsRepository:
         with self.db.connect() as conn:
             rows = conn.execute(query, tuple(params)).fetchall()
 
-        results: list[dict] = []
-        for row in rows:
-            payload = dict(row)
-            payload["tags"] = json.loads(payload.pop("tags_json") or "[]")
-            if tag and tag not in payload["tags"]:
-                continue
-            results.append(payload)
-        return results
+        return [self._row_to_payload(row) for row in rows]
 
     def update_record(
         self,
@@ -144,7 +169,7 @@ class MemoryRecordsRepository:
             params.append(summary)
         if tags is not _UNSET:
             updates.append("tags_json = ?")
-            params.append(json.dumps(tags))
+            params.append(self._encode_tags(tags))
         if importance is not _UNSET:
             updates.append("importance = ?")
             params.append(importance)
@@ -156,7 +181,7 @@ class MemoryRecordsRepository:
             params.append(external_key)
         if is_pinned is not _UNSET:
             updates.append("is_pinned = ?")
-            params.append(1 if is_pinned else 0)
+            params.append(bool(is_pinned))
         if expires_at is not _UNSET:
             updates.append("expires_at = ?")
             params.append(expires_at)
@@ -208,10 +233,7 @@ class MemoryRecordsRepository:
             ).fetchone()
         if not row:
             return None
-        payload = dict(row)
-        payload["tags"] = json.loads(payload.pop("tags_json") or "[]")
-        payload["is_pinned"] = bool(payload.get("is_pinned"))
-        return payload
+        return self._row_to_payload(row)
 
     def upsert_sync_record(
         self,
@@ -263,11 +285,11 @@ class MemoryRecordsRepository:
                         memory_type,
                         content,
                         summary,
-                        json.dumps(tags),
+                        self._encode_tags(tags),
                         importance,
                         source,
                         external_key,
-                        1 if is_pinned else 0,
+                        bool(is_pinned),
                         expires_at,
                         source_created_at,
                         source_updated_at,
@@ -275,7 +297,6 @@ class MemoryRecordsRepository:
                         row["record_id"],
                     ),
                 )
-                record_id = row["record_id"]
             else:
                 record_id = str(uuid4())
                 conn.execute(
@@ -306,11 +327,11 @@ class MemoryRecordsRepository:
                         memory_type,
                         content,
                         summary,
-                        json.dumps(tags),
+                        self._encode_tags(tags),
                         importance,
                         source,
                         external_key,
-                        1 if is_pinned else 0,
+                        bool(is_pinned),
                         expires_at,
                         source_created_at,
                         source_updated_at,
@@ -336,13 +357,7 @@ class MemoryRecordsRepository:
                 """,
                 tuple(params),
             ).fetchall()
-        results: list[dict] = []
-        for row in rows:
-            payload = dict(row)
-            payload["tags"] = json.loads(payload.pop("tags_json") or "[]")
-            payload["is_pinned"] = bool(payload.get("is_pinned"))
-            results.append(payload)
-        return results
+        return [self._row_to_payload(row) for row in rows]
 
     def soft_delete_sync_records_missing_keys(
         self,

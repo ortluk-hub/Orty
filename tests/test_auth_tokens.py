@@ -28,6 +28,17 @@ def create_client(name: str) -> dict:
     return response.json()
 
 
+def register_alfred_client(client_key: str, name: str | None = None, preferences: dict | None = None) -> dict:
+    payload = {'client_key': client_key}
+    if name is not None:
+        payload['name'] = name
+    if preferences is not None:
+        payload['preferences'] = preferences
+    response = request('POST', '/v1/clients/register', json=payload)
+    assert response.status_code == 200
+    return response.json()
+
+
 def issue_access_token(client_data: dict) -> dict:
     response = request(
         'POST',
@@ -84,6 +95,35 @@ def test_issue_access_token_rejects_invalid_client_token():
     )
 
     assert response.status_code == 401
+
+
+def test_register_alfred_client_requires_matching_key(monkeypatch):
+    monkeypatch.setattr(settings, 'ORTY_ALFRED_CLIENT_KEY', 'alfred-client-key')
+
+    response = request(
+        'POST',
+        '/v1/clients/register',
+        json={'client_key': 'wrong-key'},
+    )
+
+    assert response.status_code == 401
+
+
+def test_register_alfred_client_returns_alfred_credentials(monkeypatch):
+    monkeypatch.setattr(settings, 'ORTY_ALFRED_CLIENT_KEY', 'alfred-client-key')
+
+    created = register_alfred_client(
+        'alfred-client-key',
+        name='Kitchen Alfred',
+        preferences={'room': 'kitchen'},
+    )
+
+    assert created['name'] == 'Kitchen Alfred'
+    assert created['preferences']['room'] == 'kitchen'
+    assert created['preferences']['client_family'] == 'alfred'
+    assert created['preferences']['registration_source'] == 'alfred-client-key'
+    assert created['client_id']
+    assert created['client_token']
 
 
 def test_chat_accepts_bearer_token(monkeypatch):

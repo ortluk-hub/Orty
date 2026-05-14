@@ -14,6 +14,12 @@ load_dotenv(dotenv_path=ROOT_ENV_FILE, override=False)
 class Settings:
     def __init__(self) -> None:
         self.ORTY_SHARED_SECRET: str = os.getenv("ORTY_SHARED_SECRET", "dev-secret")
+        self.ORTY_UI_ADMIN_SECRET: str | None = (os.getenv("ORTY_UI_ADMIN_SECRET") or "").strip() or None
+        self.ORTY_ALFRED_CLIENT_KEY: str | None = (os.getenv('ORTY_ALFRED_CLIENT_KEY') or '').strip() or None
+        self.ORTY_ADMIN_SECRET: str | None = (os.getenv("ORTY_ADMIN_SECRET") or "").strip() or None
+        self.ORTY_MODEL_STORAGE_ROOT: str = os.getenv("ORTY_MODEL_STORAGE_ROOT", "/models")
+        self.ORTY_DEFAULT_MODEL_ID: str | None = (os.getenv("ORTY_DEFAULT_MODEL_ID") or "").strip() or None
+        self.ORTY_MODEL_PUBLIC_URL_TEMPLATE: str | None = (os.getenv("ORTY_MODEL_PUBLIC_URL_TEMPLATE") or "").strip() or None
         self.ORTY_DEPLOYMENT_PROFILE: str = os.getenv("ORTY_DEPLOYMENT_PROFILE", "default").strip().lower()
 
         default_llm_provider = "vertex_ai" if self.ORTY_DEPLOYMENT_PROFILE == "cloud_run_interactive" else "ollama"

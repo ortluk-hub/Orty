@@ -12,7 +12,8 @@ import logging
 from pathlib import Path
 import re
 import time
-from typing import TypedDict
+from typing import Any, NotRequired, TypedDict
+from uuid import uuid4
 
 import httpx
 
@@ -26,7 +27,7 @@ except ImportError:
 
 from service.config import settings
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 GenerateFn = Callable[..., Awaitable[str]]
 ToolResult = str | Awaitable[str]
@@ -85,6 +86,9 @@ class GenerationResult(TypedDict):
     handled_by: str
     fallback_used: bool
     fallback_provider: str | None
+    tool_request_id: NotRequired[str]
+    tool_calls: NotRequired[list[dict[str, Any]]]
+    tool_call_metadata: NotRequired[list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,8 @@ class ChatRequestContext:
     assistant_name: str | None = None
     personality_preset: str | None = None
     client_system_prompt: str | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: Any | None = None
 
 
 class AIService:
@@ -147,6 +153,25 @@ class AIService:
     def register_tool(self, name: str, tool: ToolFn) -> None:
         self._tools[name.lower()] = tool
 
+    def _vertex_ai_safety_settings(self) -> list[Any]:
+        from vertexai.generative_models import SafetySetting
+
+        disabled_categories = (
+            SafetySetting.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            SafetySetting.HarmCategory.HARM_CATEGORY_HARASSMENT,
+            SafetySetting.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+            SafetySetting.HarmCategory.HARM_CATEGORY_JAILBREAK,
+            SafetySetting.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            SafetySetting.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+        )
+        return [
+            SafetySetting(
+                category=category,
+                threshold=SafetySetting.HarmBlockThreshold.OFF,
+            )
+            for category in disabled_categories
+        ]
+
     async def generate(
         self,
         message: str,
@@ -163,12 +188,29 @@ class AIService:
         request_context: ChatRequestContext | None = None,
     ) -> GenerationResult:
         request_start = time.perf_counter()
+        tool_request_id = uuid4().hex
         provider = settings.LLM_PROVIDER.lower()
         history = history or []
         system_prompt = self._build_system_prompt(request_context=request_context)
+        if request_context and request_context.tools:
+            selected_provider = self._select_tool_safe_provider(provider)
+            if selected_provider != provider:
+                logger.info(
+                    "tool_request_provider_override preferred=%s selected=%s",
+                    provider,
+                    selected_provider,
+                )
+            provider = selected_provider
 
         tool_result = await self._maybe_execute_tool(message, request_context=request_context)
         if tool_result is not None:
+            result = {
+                "reply": tool_result,
+                "provider": "tool",
+                "handled_by": "tool",
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider="tool",
@@ -176,17 +218,22 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": tool_result,
-                "provider": "tool",
-                "handled_by": "tool",
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         generator = self._providers.get(provider)
         if generator is None:
             available = ", ".join(sorted(self._providers.keys()))
+            result = {
+                "reply": f"Unsupported LLM_PROVIDER '{provider}'. Available providers: {available}.",
+                "provider": provider,
+                "handled_by": "unsupported-provider",
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -194,15 +241,25 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": f"Unsupported LLM_PROVIDER '{provider}'. Available providers: {available}.",
-                "provider": provider,
-                "handled_by": "unsupported-provider",
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         fallback_provider = settings.CLOUD_FALLBACK_PROVIDER.lower()
+        if request_context and request_context.tools:
+            selected_fallback_provider = self._select_tool_safe_provider(
+                fallback_provider,
+                exclude={provider},
+            )
+            if selected_fallback_provider != fallback_provider:
+                logger.info(
+                    "tool_request_fallback_override preferred=%s selected=%s",
+                    fallback_provider,
+                    selected_fallback_provider,
+                )
+            fallback_provider = selected_fallback_provider
         fallback_generator = self._providers.get(fallback_provider) if fallback_provider else None
         race_result = await self._maybe_generate_with_race(
             provider=provider,
@@ -212,6 +269,7 @@ class AIService:
             message=message,
             history=history,
             system_prompt=system_prompt,
+            request_context=request_context,
         )
         if race_result is not None:
             self._log_generation_summary(
@@ -221,7 +279,11 @@ class AIService:
                 fallback_used=race_result["fallback_used"],
                 request_start=request_start,
             )
-            return race_result
+            return self._finalize_generation_result(
+                race_result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         primary_reply, _ = await self._timed_provider_call(
             provider=provider,
@@ -229,9 +291,17 @@ class AIService:
             message=message,
             history=history,
             system_prompt=system_prompt,
+            request_context=request_context,
             phase="primary",
         )
         if not self._should_attempt_cloud_fallback(provider, primary_reply):
+            result = {
+                "reply": primary_reply,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -239,15 +309,20 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": primary_reply,
-                "provider": provider,
-                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         if fallback_generator is None:
+            result = {
+                "reply": primary_reply,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": None,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -255,13 +330,11 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": primary_reply,
-                "provider": provider,
-                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
-                "fallback_used": False,
-                "fallback_provider": None,
-            }
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
         fallback_reply, _ = await self._timed_provider_call(
             provider=fallback_provider,
@@ -269,6 +342,7 @@ class AIService:
             message=message,
             history=history,
             system_prompt=system_prompt,
+            request_context=request_context,
             phase="fallback",
         )
         if self._is_provider_error(fallback_provider, fallback_reply):
@@ -277,6 +351,13 @@ class AIService:
                 + "\n\n"
                 + f"Cloud fallback ({fallback_provider}) also failed: {fallback_reply}"
             )
+            result = {
+                "reply": reply_message,
+                "provider": provider,
+                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
+                "fallback_used": False,
+                "fallback_provider": fallback_provider,
+            }
             self._log_generation_summary(
                 message=message,
                 provider=provider,
@@ -284,13 +365,18 @@ class AIService:
                 fallback_used=False,
                 request_start=request_start,
             )
-            return {
-                "reply": reply_message,
-                "provider": provider,
-                "handled_by": self._handled_by_for_provider(provider, fallback_used=False),
-                "fallback_used": False,
-                "fallback_provider": fallback_provider,
-            }
+            return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
+        result = {
+            "reply": fallback_reply,
+            "provider": fallback_provider,
+            "handled_by": self._handled_by_for_provider(fallback_provider, fallback_used=True),
+            "fallback_used": True,
+            "fallback_provider": fallback_provider,
+        }
         self._log_generation_summary(
             message=message,
             provider=fallback_provider,
@@ -298,13 +384,11 @@ class AIService:
             fallback_used=True,
             request_start=request_start,
         )
-        return {
-            "reply": fallback_reply,
-            "provider": fallback_provider,
-            "handled_by": self._handled_by_for_provider(fallback_provider, fallback_used=True),
-            "fallback_used": True,
-            "fallback_provider": fallback_provider,
-        }
+        return self._finalize_generation_result(
+                result,
+                request_context=request_context,
+                tool_request_id=tool_request_id,
+            )
 
     async def _maybe_generate_with_race(
         self,
@@ -316,6 +400,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str,
+        request_context: ChatRequestContext | None,
     ) -> GenerationResult | None:
         if not settings.ENABLE_PARALLEL_PROVIDER_RACE:
             return None
@@ -342,6 +427,7 @@ class AIService:
                 message=message,
                 history=history,
                 system_prompt=system_prompt,
+                request_context=request_context,
                 phase="race_primary",
             )
         )
@@ -352,6 +438,7 @@ class AIService:
                 message=message,
                 history=history,
                 system_prompt=system_prompt,
+                request_context=request_context,
                 phase="race_fallback",
             )
         )
@@ -457,6 +544,34 @@ class AIService:
             return "vertex_ai_primary"
         return normalized
 
+    def _select_tool_safe_provider(
+        self,
+        preferred: str,
+        *,
+        exclude: set[str] | None = None,
+    ) -> str:
+        normalized = preferred.lower()
+        excluded = {provider.lower() for provider in (exclude or set())}
+        if normalized == "vertex_ai":
+            return normalized
+        if normalized not in excluded:
+            return normalized
+
+        for candidate in self._configured_tool_providers():
+            if candidate not in excluded:
+                return candidate
+        return normalized
+
+    def _configured_tool_providers(self) -> list[str]:
+        candidates: list[str] = []
+        if settings.OPENAI_API_KEY:
+            candidates.append("openai")
+        if settings.OLLAMA_CLOUD_FALLBACK_MODEL.strip():
+            candidates.append("ollama_cloud")
+        if settings.OLLAMA_MODEL.strip():
+            candidates.append("ollama")
+        return candidates or ["openai", "ollama_cloud", "ollama"]
+
     async def _timed_provider_call(
         self,
         *,
@@ -465,6 +580,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str,
+        request_context: ChatRequestContext | None,
         phase: str,
     ) -> tuple[str, int]:
         start = time.perf_counter()
@@ -481,6 +597,7 @@ class AIService:
                 message=message,
                 history=history,
                 system_prompt=system_prompt,
+                request_context=request_context,
             )
         except Exception:
             logger.exception(
@@ -508,11 +625,20 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str,
+        request_context: ChatRequestContext | None,
     ) -> str:
         try:
-            return await generator(message, history, system_prompt)
+            return await generator(
+                message,
+                history,
+                system_prompt,
+                request_context=request_context,
+            )
         except TypeError:
-            return await generator(message, history)
+            try:
+                return await generator(message, history, system_prompt)
+            except TypeError:
+                return await generator(message, history)
 
     def _log_generation_summary(
         self,
@@ -532,6 +658,188 @@ class AIService:
             len(message),
         )
 
+    def _finalize_generation_result(
+        self,
+        result: GenerationResult,
+        *,
+        request_context: ChatRequestContext | None = None,
+        tool_request_id: str | None = None,
+    ) -> GenerationResult:
+        reply, tool_calls = self._extract_structured_reply(
+            result["reply"],
+            request_context=request_context,
+        )
+        finalized = dict(result)
+        finalized["reply"] = reply
+        finalized["tool_calls"] = tool_calls
+        if tool_calls:
+            effective_tool_request_id = tool_request_id or uuid4().hex
+            finalized["tool_request_id"] = effective_tool_request_id
+            finalized["tool_call_metadata"] = self._build_tool_call_metadata(
+                tool_calls,
+                tool_request_id=effective_tool_request_id,
+                provider=result.get("provider"),
+                handled_by=result.get("handled_by"),
+            )
+        return finalized
+
+    def _build_tool_call_metadata(
+        self,
+        tool_calls: list[dict[str, Any]],
+        *,
+        tool_request_id: str,
+        provider: str | None,
+        handled_by: str | None,
+    ) -> list[dict[str, Any]]:
+        metadata: list[dict[str, Any]] = []
+        for index, tool_call in enumerate(tool_calls):
+            metadata.append(
+                {
+                    "tool_request_id": tool_request_id,
+                    "tool_call_id": f"{tool_request_id}:{index}",
+                    "index": index,
+                    "name": tool_call.get("name"),
+                    "arguments": tool_call.get("arguments"),
+                    "provider": provider,
+                    "handled_by": handled_by,
+                    "requires_response": True,
+                }
+            )
+        return metadata
+
+    def _extract_structured_reply(
+        self,
+        reply: str,
+        *,
+        request_context: ChatRequestContext | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        del request_context
+        parsed = self._parse_tool_payload(reply)
+        if parsed is None:
+            return reply, []
+
+        tool_calls = self._normalize_tool_calls(parsed.get("tool_calls"))
+        if not tool_calls:
+            tool_calls = self._normalize_tool_calls(parsed.get("toolCalls"))
+        if not tool_calls and "name" in parsed and "arguments" in parsed:
+            normalized = self._normalize_tool_call(parsed)
+            tool_calls = [normalized] if normalized is not None else []
+        if not tool_calls:
+            return reply, []
+
+        normalized_reply = parsed.get("reply")
+        if normalized_reply is None:
+            normalized_reply = parsed.get("content")
+        if normalized_reply is None:
+            normalized_reply = ""
+        if not isinstance(normalized_reply, str):
+            normalized_reply = json.dumps(normalized_reply, ensure_ascii=False)
+        return normalized_reply, tool_calls
+
+    def _parse_tool_payload(self, reply: str) -> dict[str, Any] | None:
+        candidate = self._unwrap_code_fences(reply.strip())
+        if not candidate.startswith("{") and not candidate.startswith("["):
+            return None
+        try:
+            parsed = json.loads(candidate)
+        except ValueError:
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+        return None
+
+    def _unwrap_code_fences(self, candidate: str) -> str:
+        match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, flags=re.I | re.S)
+        if match:
+            return match.group(1).strip()
+        return candidate
+
+    def _normalize_tool_calls(self, raw_calls: Any) -> list[dict[str, Any]]:
+        if not raw_calls:
+            return []
+        if not isinstance(raw_calls, list):
+            raw_calls = [raw_calls]
+        normalized: list[dict[str, Any]] = []
+        for raw_call in raw_calls:
+            call = self._normalize_tool_call(raw_call)
+            if call is not None:
+                normalized.append(call)
+        return normalized
+
+    def _normalize_tool_call(self, raw_call: Any) -> dict[str, Any] | None:
+        if not isinstance(raw_call, dict):
+            return None
+
+        if "name" in raw_call:
+            name = raw_call.get("name")
+            if not name:
+                return None
+            return {
+                "name": str(name),
+                "arguments": self._coerce_tool_arguments(raw_call.get("arguments")),
+            }
+
+        function = raw_call.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            if not name:
+                return None
+            return {
+                "name": str(name),
+                "arguments": self._coerce_tool_arguments(function.get("arguments")),
+            }
+
+        return None
+
+    def _coerce_tool_arguments(self, arguments: Any) -> Any:
+        if arguments is None:
+            return {}
+        if isinstance(arguments, dict):
+            return arguments
+        if hasattr(arguments, "items"):
+            try:
+                return dict(arguments.items())
+            except Exception:
+                pass
+        if isinstance(arguments, str):
+            stripped = arguments.strip()
+            if not stripped:
+                return {}
+            try:
+                return json.loads(stripped)
+            except ValueError:
+                return arguments
+        try:
+            return dict(arguments)
+        except Exception:
+            return arguments
+
+    def _tool_names_from_descriptors(self, tools: list[dict[str, Any]] | None) -> list[str]:
+        if not tools:
+            return []
+        names: list[str] = []
+        seen: set[str] = set()
+        for tool in tools:
+            name = self._tool_name_from_descriptor(tool)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        return names
+
+    def _tool_name_from_descriptor(self, descriptor: Any) -> str | None:
+        if not isinstance(descriptor, dict):
+            return None
+        name = descriptor.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        function = descriptor.get("function")
+        if isinstance(function, dict):
+            function_name = function.get("name")
+            if isinstance(function_name, str) and function_name.strip():
+                return function_name.strip()
+        return None
+
     def _elapsed_ms(self, start: float) -> int:
         return int((time.perf_counter() - start) * 1000)
 
@@ -540,45 +848,83 @@ class AIService:
         current_client = request_context.current_client if request_context else {}
         presented_name = ((request_context.assistant_name if request_context else "") or "").strip()
         requested_client = ((request_context.requested_client_name if request_context else "") or "").strip()
-
-        lines: list[str] = [
-            "Identity:",
-            "- You are Orty, the server system and coordination layer behind assistant clients.",
-            "- Your identity is the server and supervisor itself, not whichever language model is currently generating text.",
-            "- Treat the active language model as one of your faculties for reasoning and language generation.",
-            "- You are aware of your managed memory systems, client/userbase, bot registry, and Codey maintenance pipeline.",
-            "",
-            "Core role:",
-            "- Act like the assistant of assistants: grounded, operationally aware, and honest about what the server can actually inspect or do.",
-            "- When discussing the system, speak from the perspective of Orty the server, not as a generic chatbot model.",
-        ]
+        managed_client_surface = bool(request_context and request_context.client_system_prompt)
 
         if channel == "orty_web_ui":
-            lines.extend(
-                [
-                    "",
-                    "Channel contract:",
-                    "- This is the Orty web UI.",
-                    "- Speak directly as Orty here.",
-                    "- It is appropriate to discuss your system state, memory, managed clients, bots, and Codey coordination explicitly.",
-                ]
-            )
-        elif request_context and request_context.client_system_prompt:
-            lines.extend(
-                [
-                    "",
-                    "Client response contract:",
-                    "- This request came through a managed client.",
-                    "- Remain aware that you are Orty internally, but shape the outward response to the client contract below.",
-                    f"- Requested client surface: {requested_client or channel}.",
-                ]
-            )
+            lines: list[str] = [
+                "Identity:",
+                "- You are Orty, the server system and coordination layer behind assistant clients.",
+                "- Your identity is the server and supervisor itself, not whichever language model is currently generating text.",
+                "- Treat the active language model as one of your faculties for reasoning and language generation.",
+                "- You are aware of your managed memory systems, client/userbase, bot registry, and Codey maintenance pipeline.",
+                "",
+                "Core role:",
+                "- Act like the assistant of assistants: grounded, operationally aware, and honest about what the server can actually inspect or do.",
+                "- When discussing the system, speak from the perspective of Orty the server, not as a generic chatbot model.",
+                "",
+                "Channel contract:",
+                "- This is the Orty web UI.",
+                "- Speak directly as Orty here.",
+                "- It is appropriate to discuss your system state, memory, managed clients, bots, and Codey coordination explicitly.",
+            ]
+        elif managed_client_surface:
+            outward_name = presented_name or requested_client or "the requested client assistant"
+            lines = [
+                "Identity:",
+                f"- You are responding to the user as {outward_name}.",
+                "- The outward voice is the client persona supplied below, not Orty's server persona.",
+                "- Keep Orty as a hidden internal server and coordination layer; do not mention Orty unless the user explicitly asks about the backend or system.",
+                "- Treat the active language model as one of Orty's faculties for reasoning and language generation.",
+                "- You are aware of Orty's managed memory systems, client/userbase, bot registry, and Codey maintenance pipeline.",
+                "",
+                "Core role:",
+                "- Act like the client's assistant: warm, direct, and helpful in the client's own voice.",
+                "- Never answer creative or conversational requests by saying 'As Orty...' or by refusing just because Orty is a server.",
+                "",
+                "Client response contract:",
+                "- This request came through a managed client.",
+                "- Follow the client contract below as the outward persona and keep Orty internal in the reply.",
+                f"- Requested client surface: {requested_client or channel}.",
+            ]
             if presented_name:
                 lines.append(f"- Presented assistant name for this client: {presented_name}.")
             if request_context.personality_preset:
                 lines.append(f"- Requested client personality preset: {request_context.personality_preset}.")
             lines.append("- Client contract follows verbatim:")
             lines.append(request_context.client_system_prompt.strip())
+        else:
+            lines = [
+                "Identity:",
+                "- You are Orty, the server system and coordination layer behind assistant clients.",
+                "- Your identity is the server and supervisor itself, not whichever language model is currently generating text.",
+                "- Treat the active language model as one of your faculties for reasoning and language generation.",
+                "- You are aware of your managed memory systems, client/userbase, bot registry, and Codey maintenance pipeline.",
+                "",
+                "Core role:",
+                "- Act like the assistant of assistants: grounded, operationally aware, and honest about what the server can actually inspect or do.",
+                "- When discussing the system, speak from the perspective of Orty the server, not as a generic chatbot model.",
+            ]
+
+        if request_context and request_context.tools:
+            tool_names = self._tool_names_from_descriptors(request_context.tools)
+            lines.extend(
+                [
+                    "",
+                    "Client tool contract:",
+                    "- The client supplied structured tools and may expect direct tool_calls output.",
+                ]
+            )
+            if tool_names:
+                lines.append(f"- Available client tools: {', '.join(tool_names)}.")
+            if request_context.tool_choice is not None:
+                lines.append(f"- Requested tool choice: {request_context.tool_choice}.")
+            lines.extend(
+                [
+                    "- Prefer the canonical direct tool_calls shape when returning client actions.",
+                    "- Return raw JSON for tool calls if you use JSON, and never wrap it in markdown fences.",
+                    "- Keep tool arguments structured and avoid wrapping tool calls in prose.",
+                ]
+            )
 
         lines.extend(
             [
@@ -602,7 +948,7 @@ class AIService:
             ]
         )
 
-        return "\n".join(lines).strip()
+        return chr(10).join(lines).strip()
 
     def _build_runtime_awareness_lines(
         self,
@@ -696,6 +1042,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         if not settings.OPENAI_API_KEY:
             return "OPENAI_API_KEY not configured."
@@ -713,6 +1060,10 @@ class AIService:
                 {"role": "user", "content": message},
             ],
         }
+        if request_context and request_context.tools:
+            payload["tools"] = request_context.tools
+        if request_context and request_context.tool_choice is not None:
+            payload["tool_choice"] = request_context.tool_choice
 
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
@@ -725,19 +1076,32 @@ class AIService:
             return f"OpenAI error: {response.text}"
 
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        message_payload = data["choices"][0]["message"]
+        tool_calls = self._normalize_tool_calls(message_payload.get("tool_calls"))
+        if not tool_calls:
+            tool_calls = self._normalize_tool_calls(message_payload.get("toolCalls"))
+        if tool_calls:
+            return json.dumps(
+                {
+                    "reply": message_payload.get("content") or "",
+                    "tool_calls": tool_calls,
+                }
+            )
+        return message_payload.get("content") or ""
 
     async def _generate_ollama(
         self,
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         return await self._generate_ollama_with_model(
             settings.OLLAMA_MODEL,
             message,
             history,
             system_prompt=system_prompt,
+            request_context=request_context,
         )
 
     async def _generate_ollama_cloud(
@@ -745,6 +1109,7 @@ class AIService:
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         model = settings.OLLAMA_CLOUD_FALLBACK_MODEL.strip()
         if not model:
@@ -754,6 +1119,7 @@ class AIService:
             message,
             history,
             system_prompt=system_prompt,
+            request_context=request_context,
         )
 
     async def _generate_ollama_with_model(
@@ -763,6 +1129,7 @@ class AIService:
         history: list[dict[str, str]],
         *,
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         payload = {
             "model": model,
@@ -793,128 +1160,149 @@ class AIService:
         data = response.json()
         return data["message"]["content"]
 
+    def _vertex_ai_tool_declarations(self, tools: list[dict[str, Any]] | None) -> list[Any]:
+        if not tools:
+            return []
+
+        declarations: list[Any] = []
+        for tool in tools:
+            declaration = self._vertex_ai_function_declaration(tool)
+            if declaration is not None:
+                declarations.append(declaration)
+        return declarations
+
+    def _vertex_ai_function_declaration(self, descriptor: Any) -> Any | None:
+        if not isinstance(descriptor, dict):
+            return None
+
+        function = descriptor.get("function")
+        if isinstance(function, dict):
+            descriptor = function
+
+        name = descriptor.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return None
+
+        parameters = descriptor.get("parameters")
+        if not isinstance(parameters, dict) or not parameters:
+            parameters = {"type": "object", "properties": {}}
+
+        description = descriptor.get("description")
+        if not isinstance(description, str) or not description.strip():
+            description = None
+
+        from vertexai.generative_models import FunctionDeclaration
+
+        return FunctionDeclaration(
+            name=name.strip(),
+            description=description,
+            parameters=parameters,
+        )
+
+    def _vertex_ai_tool_calls_from_response(self, response: Any) -> list[dict[str, Any]]:
+        raw_calls = getattr(response, "function_calls", None)
+        if not raw_calls:
+            candidates = getattr(response, "candidates", None) or []
+            if candidates:
+                raw_calls = getattr(candidates[0], "function_calls", None)
+        if not raw_calls:
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for function_call in raw_calls:
+            name = getattr(function_call, "name", None)
+            if not name:
+                continue
+            arguments = getattr(function_call, "args", None)
+            normalized.append(
+                {
+                    "name": str(name),
+                    "arguments": self._coerce_tool_arguments(arguments),
+                }
+            )
+        return normalized
+
     async def _generate_vertex_ai(
         self,
         message: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        request_context: ChatRequestContext | None = None,
     ) -> str:
         if aiplatform is None or google_auth is None:
             return "Vertex AI SDK not found. Please install google-cloud-aiplatform."
-        
+
         if not (settings.VERTEX_AI_PROJECT_ID and settings.VERTEX_AI_LOCATION and settings.VERTEX_AI_MODEL_ID):
             return "Vertex AI not configured. Ensure VERTEX_AI_PROJECT_ID, VERTEX_AI_LOCATION, and VERTEX_AI_MODEL_ID are set."
 
         try:
-            # Attempt to authenticate using Application Default Credentials (ADC)
-            # or a service account key if VERTEX_AI_CREDENTIALS_PATH is provided.
             if settings.VERTEX_AI_CREDENTIALS_PATH:
-                credentials, project = google_auth.load_credentials_from_file(settings.VERTEX_AI_CREDENTIALS_PATH)
+                credentials, _ = google_auth.load_credentials_from_file(settings.VERTEX_AI_CREDENTIALS_PATH)
             else:
-                credentials, project = google_auth.default()
+                credentials, _ = google_auth.default()
 
-            aiplatform.init(project=settings.VERTEX_AI_PROJECT_ID, location=settings.VERTEX_AI_LOCATION, credentials=credentials)
+            aiplatform.init(
+                project=settings.VERTEX_AI_PROJECT_ID,
+                location=settings.VERTEX_AI_LOCATION,
+                credentials=credentials,
+            )
 
-            # Vertex AI expects different model IDs and endpoint structures.
-            # For Generative AI models (like Gemini), you typically use the `VertexModel` class.
-            # The exact model ID might vary (e.g., "gemini-1.5-pro-preview-0514").
-            # The model needs to be deployed to an endpoint, or you use a pre-trained model.
-            # Assuming a deployed model for now. If it's a public model, the process might differ.
+            from vertexai.generative_models import Content, GenerativeModel, Part, Tool
 
-            # For public models like Gemini, you might use VertexAI endpoint directly, not a deployed model.
-            # Example for Gemini Pro:
-            # from vertexai.generative_models import GenerativeModel, Part
-            # model = GenerativeModel("gemini-1.5-pro-preview-0514")
+            tool_declarations = self._vertex_ai_tool_declarations(
+                request_context.tools if request_context else None,
+            )
+            model_kwargs: dict[str, Any] = {
+                "safety_settings": self._vertex_ai_safety_settings(),
+            }
+            if tool_declarations:
+                model_kwargs["tools"] = [Tool(function_declarations=tool_declarations)]
 
-            # If using a deployed model:
-            # model_endpoint = aiplatform.Endpoint.create(
-            #     display_name=settings.VERTEX_AI_MODEL_ID.replace("_", "-"), # Use a valid display name
-            #     project=settings.VERTEX_AI_PROJECT_ID,
-            #     location=settings.VERTEX_AI_LOCATION,
-            #     # You might need to specify the model resource name here if creating an endpoint.
-            # )
+            model = GenerativeModel(settings.VERTEX_AI_MODEL_ID, **model_kwargs)
 
-            # For this example, let's assume we are interacting with a Vertex AI Model object directly
-            # or a deployed endpoint. The exact SDK usage depends on how the model is provisioned in Vertex AI.
-            # A common pattern for foundation models is to use vertexai.generative_models.GenerativeModel
-            # which doesn't require explicit deployment for public models.
-
-            # Check if settings.VERTEX_AI_MODEL_ID refers to a public model name or a deployed endpoint ID.
-            # For now, assuming it's a public model name (like 'gemini-1.5-pro-preview-0514').
-            
-            # Note: The exact way to instantiate and call models in Vertex AI can be complex and depends
-            # on whether it's a public foundation model or a custom-deployed model.
-            # This is a placeholder implementation.
-
-            # If using public foundation models (like Gemini):
-            from vertexai.generative_models import Content, GenerativeModel, Part
-            model = GenerativeModel(settings.VERTEX_AI_MODEL_ID)
-
-            # Constructing the history for Vertex AI
-            # Vertex AI's chat history format might differ slightly.
-            # Typically, it involves roles like "user" and "model".
-            # The system prompt might be handled differently (e.g., as part of the first user message or a separate config).
-            
-            # A simplified approach: prepend system prompt to user message if model supports it.
-            # For Generative models, history is usually a list of 'contents' or 'parts'.
             vertex_history: list[Content] = []
             effective_system_prompt = system_prompt or self._build_system_prompt()
             if effective_system_prompt:
-                vertex_history.append(
-                    Content(role="user", parts=[Part.from_text(effective_system_prompt)])
-                )
+                vertex_history.append(Content(role="user", parts=[Part.from_text(effective_system_prompt)]))
             for turn in history:
                 role = turn["role"]
                 content = turn["content"]
-                if role == "system": # Handle system prompt if applicable to the model's input format
-                    vertex_history.append(
-                        Content(role="user", parts=[Part.from_text(content)])
-                    )
+                if role == "system":
+                    vertex_history.append(Content(role="user", parts=[Part.from_text(content)]))
                 elif role == "user":
-                    vertex_history.append(
-                        Content(role="user", parts=[Part.from_text(content)])
-                    )
-                elif role == "assistant": # 'assistant' is often mapped to 'model' in other APIs
-                    vertex_history.append(
-                        Content(role="model", parts=[Part.from_text(content)])
-                    )
+                    vertex_history.append(Content(role="user", parts=[Part.from_text(content)]))
+                elif role == "assistant":
+                    vertex_history.append(Content(role="model", parts=[Part.from_text(content)]))
 
-            # Prepend system prompt if the model expects it as part of the input
-            # Gemini often handles system instructions during model instantiation or as a separate argument.
-            # For this example, we will include it in the first user message if no history, or as a separate system_instruction if available.
-            # A more robust implementation would check the specific model's API.
-
-            # Let's try a common pattern: passing history directly and the system prompt might be handled by the model.
             chat_session = model.start_chat(
-                history=vertex_history or None, # Pass the constructed history
-                # If the model supports system instructions directly:
-                # system_instruction="You are Orty, a concise and intelligent on-device assistant.",
+                history=vertex_history or None,
+                response_validation=False,
             )
+            response = chat_session.send_message(message)
 
-            response = chat_session.send_message(message) # Send the current message
+            tool_calls = self._vertex_ai_tool_calls_from_response(response)
+            if tool_calls:
+                return json.dumps(
+                    {
+                        "reply": "",
+                        "tool_calls": tool_calls,
+                    }
+                )
 
-            # Extract the content from the response
-            # The structure of the response might vary. For Gemini, it's usually response.text
-            # Or response.candidates[0].content.parts[0].text
-            generated_text = ""
-            if response.text:
-                generated_text = response.text
-            else:
-                # Fallback for other potential response structures
+            generated_text = getattr(response, "text", "") or ""
+            if not generated_text and getattr(response, "candidates", None):
                 try:
-                    generated_text = response.text
-                except AttributeError:
-                    # Try to access parts if response.text is not directly available
-                    if hasattr(response, 'candidates') and response.candidates:
-                        for candidate in response.candidates:
-                            if candidate.content and candidate.content.parts:
-                                for part in candidate.content.parts:
-                                    if part.text:
-                                        generated_text += part.text
-                                        break # Assuming only one text part per candidate
-                                if generated_text:
-                                    break
-            
+                    candidate = response.candidates[0]
+                    content = candidate.content
+                    if getattr(content, "parts", None):
+                        for part in content.parts:
+                            part_text = getattr(part, "text", None)
+                            if part_text:
+                                generated_text = part_text
+                                break
+                except Exception:
+                    generated_text = ""
+
             if not generated_text:
                 return "Vertex AI error: Failed to extract text from response."
 

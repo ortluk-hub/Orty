@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,11 @@ class EscalationContext(BaseModel):
     memory_record_ids: list[str] = Field(default_factory=list)
 
 
+class ChatToolCall(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    arguments: Any = Field(default_factory=dict)
+
+
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
@@ -27,6 +32,8 @@ class ChatRequest(BaseModel):
     personality_preset: str | None = Field(default=None, min_length=1, max_length=80)
     system_prompt: str | None = Field(default=None, max_length=12000)
     recent_messages: list[EscalationMessage] = Field(default_factory=list)
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    tool_choice: Any | None = None
     escalation_context: EscalationContext | None = None
 
 
@@ -34,6 +41,9 @@ class ChatResponse(BaseModel):
     reply: str
     conversation_id: str
     used_history: int = 0
+    tool_calls: list[ChatToolCall] = Field(default_factory=list)
+    tool_request_id: str | None = None
+    tool_call_metadata: list[dict[str, Any]] = Field(default_factory=list)
     handled_by: str | None = None
     provider: str | None = None
     fallback_used: bool = False
@@ -70,6 +80,12 @@ class SpeechSynthesizeResponse(BaseModel):
 
 
 class ClientCreateRequest(BaseModel):
+    name: str | None = None
+    preferences: dict = Field(default_factory=dict)
+
+
+class ClientRegisterRequest(BaseModel):
+    client_key: str = Field(min_length=1, max_length=200)
     name: str | None = None
     preferences: dict = Field(default_factory=dict)
 
@@ -205,6 +221,28 @@ class ClientIntrospectResponse(BaseModel):
     expires_at: str | None = None
     revoked_at: str | None = None
     last_used_at: str | None = None
+
+
+class ModelRegistryItemResponse(BaseModel):
+    id: str
+    name: str
+    size_bytes: int
+    sha256: str
+    is_default: bool = False
+
+
+class ModelPublicUrlTemplateRequest(BaseModel):
+    public_url_template: str | None = Field(default=None, max_length=2000)
+
+
+class ModelPublicUrlTemplateResponse(BaseModel):
+    public_url_template: str | None = None
+
+
+class ModelDownloadLinkResponse(BaseModel):
+    model_id: str
+    download_url: str
+    filename: str | None = None
 
 
 class MemoryRecordCreateRequest(BaseModel):

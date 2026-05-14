@@ -8,7 +8,7 @@ from service.ai import ChatRequestContext
 from service.models.schemas import ChatRequest, ChatResponse, EscalationContext
 
 router = APIRouter()
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 
 @router.post('/chat', response_model=ChatResponse)
@@ -41,13 +41,19 @@ async def chat(payload: ChatRequest, request: Request, auth: dict = Depends(get_
             assistant_name=payload.assistant_name,
             personality_preset=payload.personality_preset,
             client_system_prompt=payload.system_prompt,
+            tools=payload.tools,
+            tool_choice=payload.tool_choice,
         ),
     )
     reply = generated["reply"]
+    tool_calls = generated.get("tool_calls") or []
+    tool_request_id = generated.get("tool_request_id")
+    tool_call_metadata = generated.get("tool_call_metadata") or []
 
     if payload.persist:
         runtime.memory_store.append_message(conversation_id, 'user', payload.message, client_id=client_id)
-        runtime.memory_store.append_message(conversation_id, 'assistant', reply, client_id=client_id)
+        if reply.strip():
+            runtime.memory_store.append_message(conversation_id, 'assistant', reply, client_id=client_id)
 
     logger.info(
         "chat_request_completed conversation_id=%s client_id=%s provider=%s handled_by=%s fallback_used=%s total_ms=%d message_chars=%d history=%d",
@@ -65,6 +71,9 @@ async def chat(payload: ChatRequest, request: Request, auth: dict = Depends(get_
         reply=reply,
         conversation_id=conversation_id,
         used_history=len(history),
+        tool_calls=tool_calls,
+        tool_request_id=tool_request_id,
+        tool_call_metadata=tool_call_metadata,
         handled_by=generated.get("handled_by"),
         provider=generated.get("provider"),
         fallback_used=bool(generated.get("fallback_used", False)),

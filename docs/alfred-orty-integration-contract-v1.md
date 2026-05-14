@@ -26,6 +26,7 @@ Identity is per Alfred instance (client instance), not per end user.
 
 Current auth endpoints:
 
+- `POST /v1/clients/register`: public Alfred client registration using `ORTY_ALFRED_CLIENT_KEY`.
 - `POST /v1/clients` (admin secret required): provision client identity.
 - `POST /v1/auth/token`: exchange `client_id + client_token` for bearer access token.
 - `POST /v1/auth/rotate`: rotate long-lived client credential.

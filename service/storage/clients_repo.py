@@ -115,6 +115,18 @@ class ClientsRepository:
             "created_at": created_at,
         }
 
+    def register_alfred_client(
+        self,
+        *,
+        name: str | None = None,
+        preferences: dict | None = None,
+    ) -> dict:
+        merged_preferences = dict(preferences or {})
+        merged_preferences.setdefault('client_family', 'alfred')
+        merged_preferences.setdefault('registration_source', 'alfred-client-key')
+        return self.create_client(name=name, preferences=merged_preferences)
+
+
     def list_clients(self) -> list[dict]:
         with self.db.connect() as conn:
             rows = conn.execute(

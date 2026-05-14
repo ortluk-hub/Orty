@@ -1,6 +1,9 @@
 fastapi
 uvicorn
+hypercorn
 pydantic
 python-dotenv
 httpx
-
+python-multipart
+google-cloud-aiplatform
+psycopg[binary]

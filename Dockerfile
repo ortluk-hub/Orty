@@ -12,4 +12,4 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["uvicorn", "service.api:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "hypercorn", "service.api:app", "--bind", "0.0.0.0:8080", "--worker-class", "asyncio", "--access-logfile", "-", "--error-logfile", "-"]
